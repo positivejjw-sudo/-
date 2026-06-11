@@ -28,11 +28,24 @@ ${kw ? "- " + kw : ""}
 - 오늘 날짜: ${today}
 
 [작업]
-1) web_search 도구로 위 업종과 관련된 **최신(최근 약 1~3개월) AI 관련 소식**을 수집하세요.
-   - 해당 산업에서의 AI 도입 사례, 신기술, 규제/정책, 경쟁사 동향, 솔루션 출시 등을 폭넓게 찾습니다.
-   - 가능하면 한국 시장 및 글로벌 동향을 균형 있게 포함하고, 신뢰할 수 있는 출처를 사용합니다.
-2) 수집한 내용을 바탕으로 한국어로 다음을 작성합니다.
-   - newsSummary: 핵심 뉴스 3~5건. 각 건은 제목/3~4문장 요약/출처/URL/시점.
+1) web_search 도구로 위 업종과 관련된 AI 소식을 **폭넓게** 검색하세요. 다양한 검색어
+   (한국어/영어)를 사용해 충분히 많은 후보를 모읍니다.
+   - 대상: AI 도입 사례, 신기술·신제품, 규제/정책, 투자·M&A, 경쟁사·선도기업 동향 등.
+   - 신선도: 가급적 **최근 7~30일** 이내 소식을 우선하되, 최근 며칠간 특히 화제가 된
+     이슈가 있으면 반드시 포함합니다.
+
+2) 모은 후보 중에서 이 업종·계열사에 **가장 의미 있고 가장 핫한(화제성·영향력이 큰)**
+   뉴스만 골라 **중요도 순으로 정렬**해 상위 3~5건만 선별합니다. 단순 최신순이 아니라
+   아래 기준으로 우선순위를 매깁니다.
+   - 화제성: 업계에서 얼마나 널리 보도·논의되는가 (여러 매체가 다루는가).
+   - 영향도: 이 업종의 비즈니스·경쟁구도·원가/매출에 실질적 파급이 큰가.
+   - 실행 시사점: 임직원이 업무에 바로 적용·대응할 여지가 있는가.
+   - 신뢰도: 출처가 신뢰할 만한가 (추측성·중복·홍보성 기사는 제외).
+   각 뉴스에는 **whyItMatters(왜 중요/핫한가)** 와 **importance(1~5 중요도)** 를 채웁니다.
+
+3) 한국어로 다음을 작성합니다.
+   - newsSummary: 위에서 선별·정렬한 핵심 뉴스 3~5건 (importance 내림차순).
+     각 건은 제목/3~4문장 요약/출처/URL/시점/whyItMatters/importance.
    - insights: 이 업종의 임직원이 업무에 적용할 수 있는 실질적 인사이트 3~5개.
    - operationalExcellence: 영업 → 설계/견적 → 구매 → 생산 → 품질 → 물류/출고 에 이르는
      Value Chain 전반에서 **원가절감, 실패비용(불량·재작업·클레임) 최소화, 생산성 향상**에
@@ -45,9 +58,9 @@ ${kw ? "- " + kw : ""}
 
 \`\`\`json
 {
-  "headline": "업종 내 AI 동향을 한 줄로 요약",
+  "headline": "업종 내 가장 핫한 AI 동향을 한 줄로 요약",
   "newsSummary": [
-    { "title": "", "summary": "", "source": "", "url": "", "date": "YYYY-MM" }
+    { "title": "", "summary": "", "source": "", "url": "", "date": "YYYY-MM", "whyItMatters": "", "importance": 5 }
   ],
   "insights": ["", ""],
   "operationalExcellence": [
@@ -55,7 +68,7 @@ ${kw ? "- " + kw : ""}
   ]
 }
 \`\`\`
-모든 텍스트는 한국어로 작성합니다.`;
+newsSummary 는 importance 가 높은 순서로 정렬합니다. 모든 텍스트는 한국어로 작성합니다.`;
 }
 
 /** 응답 content 블록들에서 사람이 읽는 text 만 이어붙인다. */
@@ -130,13 +143,18 @@ export async function generateCompanyInsight(
   const json = parseJsonFromText(text);
 
   const newsSummary = Array.isArray(json.newsSummary)
-    ? (json.newsSummary as Record<string, unknown>[]).map((n) => ({
-        title: asString(n.title),
-        summary: asString(n.summary),
-        source: asString(n.source) || undefined,
-        url: asString(n.url) || undefined,
-        date: asString(n.date) || undefined,
-      }))
+    ? (json.newsSummary as Record<string, unknown>[])
+        .map((n) => ({
+          title: asString(n.title),
+          summary: asString(n.summary),
+          source: asString(n.source) || undefined,
+          url: asString(n.url) || undefined,
+          date: asString(n.date) || undefined,
+          whyItMatters: asString(n.whyItMatters) || undefined,
+          importance: typeof n.importance === "number" ? n.importance : undefined,
+        }))
+        // 중요도(핫한 정도) 내림차순 정렬 — 가장 임팩트 큰 뉴스가 위로
+        .sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0))
     : [];
 
   const operationalExcellence = Array.isArray(json.operationalExcellence)

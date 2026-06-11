@@ -24,11 +24,20 @@ export function renderHtml(insight: CompanyInsight, groupName: string): string {
       const link = n.url
         ? `<div style="margin-top:4px;"><a href="${esc(n.url)}" style="color:#1a73e8;font-size:12px;">원문 보기</a></div>`
         : "";
+      // 중요도 4 이상은 🔥 핫이슈 배지
+      const badge =
+        (n.importance ?? 0) >= 4
+          ? `<span style="display:inline-block;background:#fef2f2;color:#dc2626;font-size:11px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px;vertical-align:middle;">🔥 핫이슈</span>`
+          : "";
+      const why = n.whyItMatters
+        ? `<div style="font-size:13px;color:#7c3aed;line-height:1.6;margin-top:4px;"><b>왜 중요한가</b> · ${esc(n.whyItMatters)}</div>`
+        : "";
       return `
-        <li style="margin-bottom:14px;">
-          <div style="font-weight:600;color:#111;">${esc(n.title)}</div>
+        <li style="margin-bottom:16px;">
+          <div style="font-weight:600;color:#111;">${esc(n.title)}${badge}</div>
           ${meta ? `<div style="font-size:12px;color:#888;margin:2px 0;">${esc(meta)}</div>` : ""}
           <div style="font-size:14px;color:#333;line-height:1.6;">${esc(n.summary)}</div>
+          ${why}
           ${link}
         </li>`;
     })
@@ -67,7 +76,7 @@ export function renderHtml(insight: CompanyInsight, groupName: string): string {
         ${esc(insight.headline)}
       </div>
 
-      <h2 style="font-size:16px;color:#111;border-bottom:2px solid #0f172a;padding-bottom:6px;">📰 업종 내 AI 주요 소식</h2>
+      <h2 style="font-size:16px;color:#111;border-bottom:2px solid #0f172a;padding-bottom:6px;">📰 업종 내 가장 핫한 AI 소식</h2>
       <ul style="padding-left:18px;margin:12px 0 24px;">${newsHtml || "<li>수집된 뉴스가 없습니다.</li>"}</ul>
 
       <h2 style="font-size:16px;color:#111;border-bottom:2px solid #0f172a;padding-bottom:6px;">💡 임직원 인사이트</h2>

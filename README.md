@@ -5,7 +5,9 @@
 최소화·생산성 향상)을 자동 생성하여, 계열사별 **수신자/참조자에게 메일을 발송**합니다.
 
 - **요약·인사이트 생성:** Claude (`claude-opus-4-8`) + 웹 검색(`web_search`) 서버 도구
+  - 단순 최신순이 아니라 **화제성·영향도·실행 시사점** 기준으로 가장 핫한 뉴스만 선별(🔥)
 - **메일 발송:** Gmail SMTP (nodemailer)
+- **자동 발송:** 매일 정해진 시간(예: 오전 8시) 스케줄 발송 (`node-cron`, 시간대 지원)
 - **언어/런타임:** Node.js + TypeScript
 
 ---
@@ -44,6 +46,9 @@ cp .env.example .env
 | `GMAIL_APP_PASSWORD` | Gmail **앱 비밀번호** (로그인 비밀번호 아님) |
 | `MAIL_FROM_NAME` | (선택) 발신자 표시 이름 |
 | `CLAUDE_MODEL` | (선택) 기본값 `claude-opus-4-8` |
+| `SEND_TIME` | (자동 발송) 매일 발송 시각 `HH:MM` (기본 `08:00`) |
+| `SEND_TIMEZONE` | (자동 발송) 시간대 (기본 `Asia/Seoul`) |
+| `SEND_CRON` | (선택) cron 식 직접 지정 — `SEND_TIME`보다 우선 |
 
 > **Gmail 앱 비밀번호 발급:** Google 계정 → 보안 → 2단계 인증 사용 설정 → "앱 비밀번호" 생성.
 
@@ -77,12 +82,33 @@ npm run dev -- --dry-run
 # 2) 특정 계열사만
 npm run dev -- --company 범한산업 --dry-run
 
-# 3) 실제 메일 발송
+# 3) 실제 메일 발송 (1회)
 npm run dev
 
 # 옵션 확인
 npm run dev -- --help
 ```
+
+### 매일 자동 발송 (스케줄 모드)
+
+`.env` 에 `SEND_TIME`(기본 `08:00`)과 `SEND_TIMEZONE`(기본 `Asia/Seoul`)을 설정한 뒤,
+상주 프로세스로 실행하면 매일 그 시각에 자동 발송합니다.
+
+```bash
+# 매일 SEND_TIME 에 자동 발송 (프로세스 상주)
+npm run schedule
+
+# 시작 즉시 1회 발송 + 이후 매일 반복 (동작 확인용으로 유용)
+npm run dev -- --schedule --run-now
+```
+
+> 24시간 떠 있는 서버가 없다면, **1회 실행 모드(`npm start`)를 OS 스케줄러로 호출**해도 됩니다.
+> - **Linux cron** (매일 08:00):
+>   ```
+>   0 8 * * *  cd /경로/beomhan-ai-insights && /usr/bin/node dist/index.js >> run.log 2>&1
+>   ```
+> - **GitHub Actions / 컨테이너**: `schedule: cron` 으로 `npm start` 를 호출.
+> 이때는 `--schedule` 없이 1회 실행 모드를 쓰며, 시각 제어는 외부 스케줄러가 담당합니다.
 
 빌드 후 실행도 가능합니다.
 
@@ -94,6 +120,8 @@ npm run build && npm start -- --dry-run
 
 | 옵션 | 설명 |
 | --- | --- |
+| `--schedule` | 매일 `SEND_TIME` 에 자동 발송 (상주 모드) |
+| `--run-now` | `--schedule` 와 함께: 시작 직후 1회 즉시 실행 |
 | `--config <경로>` | 계열사 설정 파일 경로 (기본 `config/companies.json`) |
 | `--company <이름>` | 이름 부분일치로 특정 계열사만 처리 |
 | `--dry-run` | 발송하지 않고 `./out/` 에 HTML 미리보기 저장 |
@@ -102,9 +130,10 @@ npm run build && npm start -- --dry-run
 
 ```
 src/
-  index.ts          CLI 오케스트레이션 (계열사 순회·발송)
+  index.ts          CLI 오케스트레이션 (1회 / 스케줄 모드)
+  scheduler.ts      매일 정기 발송 (node-cron, SEND_TIME/SEND_CRON)
   config.ts         .env / companies.json 로드·검증
-  newsInsights.ts   Claude 웹 검색 → 요약·인사이트·OpEx(JSON) 생성
+  newsInsights.ts   Claude 웹 검색 → 핫뉴스 선별·요약·인사이트·OpEx(JSON)
   emailTemplate.ts  한국어 HTML 메일 렌더링
   mailer.ts         Gmail SMTP 발송
   types.ts          공통 타입

@@ -30,6 +30,10 @@ export interface NewsItem {
   url?: string;
   /** 보도 시점 (예: 2026-05) */
   date?: string;
+  /** 이 계열사·업종에 왜 중요한가 (화제성·영향도 근거) */
+  whyItMatters?: string;
+  /** 중요도 점수 (1~5, 높을수록 핫·임팩트 큼) */
+  importance?: number;
 }
 
 /** Value Chain 단계별 Operational Excellence 제언 */
