@@ -1,0 +1,23 @@
+{
+  "name": "beomhan-ai-insights",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "범한그룹 계열사 업종별 AI 뉴스 요약·인사이트·Operational Excellence 제언 메일 발송 솔루션",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
+    "dotenv": "^16.4.5",
+    "nodemailer": "^6.9.16"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^6.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
