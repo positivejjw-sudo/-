@@ -51,6 +51,81 @@ const POLICY_TYPES = [
 ];
 
 /*
+ * 보험 종류별 "보장 템플릿" — 폼에서 버튼 한 번으로 흔한 보장을 채워줍니다.
+ * 금액은 사람마다 다르므로 비워두고, 사용자가 증권을 보고 채우도록 안내(note)만 둡니다.
+ */
+const COVERAGE_TEMPLATES = {
+  '실손의료보험': [
+    { category: 'actualloss', name: '입원 의료비(실손)', note: '본인부담 제외, 연간 한도' },
+    { category: 'actualloss', name: '통원 의료비(실손)', note: '1회 자기부담금 공제' },
+    { category: 'actualloss', name: '처방조제비(실손)', note: '건당 자기부담금 공제' },
+    { category: 'actualloss', name: '비급여(도수·주사·MRI)', note: '특약별 횟수·한도 확인' },
+  ],
+  '암보험': [
+    { category: 'diagnosis', name: '암진단비', note: '90일 면책, 소액암 제외 여부 확인' },
+    { category: 'diagnosis', name: '소액암 진단비', note: '갑상선·제자리암·경계성종양 등' },
+    { category: 'surgery',   name: '암수술비', note: '회당' },
+    { category: 'hospital',  name: '암입원일당', note: '1일당, 한도일수 확인' },
+    { category: 'diagnosis', name: '항암방사선·약물치료비', note: '' },
+  ],
+  '종신보험': [
+    { category: 'death', name: '일반사망보험금', note: '' },
+    { category: 'death', name: '재해사망보험금', note: '재해분류표 기준' },
+  ],
+  '정기보험': [
+    { category: 'death', name: '사망보험금', note: '보험기간 내 사망 시' },
+  ],
+  '상해보험': [
+    { category: 'death',       name: '상해사망', note: '' },
+    { category: 'disability',  name: '상해후유장해', note: '장해율에 비례 지급' },
+    { category: 'injury',      name: '골절진단비', note: '' },
+    { category: 'hospital',    name: '상해입원일당', note: '1일당' },
+    { category: 'surgery',     name: '상해수술비', note: '' },
+  ],
+  '질병보험': [
+    { category: 'death',      name: '질병사망', note: '' },
+    { category: 'hospital',   name: '질병입원일당', note: '1일당' },
+    { category: 'surgery',    name: '질병수술비', note: '' },
+    { category: 'diagnosis',  name: '뇌혈관 진단비', note: '보장 질병코드 범위 확인(I60~I69 등)' },
+    { category: 'diagnosis',  name: '허혈성심장질환 진단비', note: 'I20~I25 등' },
+  ],
+  '운전자보험': [
+    { category: 'driving', name: '교통사고처리지원금', note: '' },
+    { category: 'driving', name: '자동차사고 변호사선임비', note: '' },
+    { category: 'driving', name: '운전자 벌금', note: '대인/대물 한도 확인' },
+    { category: 'driving', name: '자동차부상치료비', note: '부상등급별' },
+  ],
+  '자동차보험': [
+    { category: 'liability', name: '대인배상 Ⅰ·Ⅱ', note: '의무가입' },
+    { category: 'liability', name: '대물배상', note: '' },
+    { category: 'injury',    name: '자동차상해(자기신체사고)', note: '' },
+    { category: 'fire',      name: '자기차량손해', note: '자기부담금 확인' },
+    { category: 'driving',   name: '무보험차상해', note: '' },
+  ],
+  '화재보험': [
+    { category: 'fire',      name: '화재 건물손해', note: '' },
+    { category: 'fire',      name: '화재 가재도구손해', note: '' },
+    { category: 'liability', name: '일상생활배상책임', note: '자기부담금 있음' },
+  ],
+  '치아보험': [
+    { category: 'dental', name: '보철치료(임플란트·브릿지·틀니)', note: '면책·감액기간 확인' },
+    { category: 'dental', name: '보존치료(충전·신경)', note: '' },
+    { category: 'dental', name: '크라운치료', note: '' },
+  ],
+  '간병/장기요양보험': [
+    { category: 'care',       name: '장기요양 진단비', note: '등급별' },
+    { category: 'care',       name: '간병자금', note: '' },
+    { category: 'diagnosis',  name: '중증치매 진단비', note: 'CDR 척도 확인' },
+  ],
+  '어린이보험': [
+    { category: 'hospital',  name: '질병입원일당', note: '1일당' },
+    { category: 'injury',    name: '골절진단비', note: '' },
+    { category: 'diagnosis', name: '소아암 진단비', note: '' },
+    { category: 'liability', name: '일상생활배상책임(자녀)', note: '' },
+  ],
+};
+
+/*
  * 상황별 보장 찾기
  *  - cats: 이 상황에서 보통 관련되는 보장 카테고리
  *  - keywords: 보장 이름에 이 단어가 들어가면 매칭(카테고리를 안 정했어도 잡아줌)
