@@ -1,148 +1,36 @@
-# 범한그룹 AI 인사이트 메일 발송 솔루션
+# 내 보험 한눈에 📱🛡️
 
-범한그룹 각 계열사의 **영위 업종**을 입력해 두면, 해당 업종의 **최신 AI 소식을 웹 검색으로 수집·요약**하고,
-임직원에게 줄 수 있는 **인사이트**와 **Operational Excellence 제언**(영업~출고 Value Chain의 원가절감·실패비용
-최소화·생산성 향상)을 자동 생성하여, 계열사별 **수신자/참조자에게 메일을 발송**합니다.
+내가 가입한 **보험 회사·상품**과 **보장 범위**를 한눈에 정리하고,
+"이런 일이 생겼을 때 내 보험으로 보험금을 받을 수 있나?"를 쉽게 알려주는 **개인 보험 정리 앱(PWA)** 입니다.
 
-- **요약·인사이트 생성:** Claude (`claude-opus-4-8`) + 웹 검색(`web_search`) 서버 도구
-  - 단순 최신순이 아니라 **화제성·영향도·실행 시사점** 기준으로 가장 핫한 뉴스만 선별(🔥)
-- **메일 발송:** Gmail SMTP (nodemailer)
-- **자동 발송:** 매일 정해진 시간(예: 오전 8시) 스케줄 발송 (`node-cron`, 시간대 지원)
-- **언어/런타임:** Node.js + TypeScript
+> 보험 용어가 어렵고, 막상 일이 생겼을 때 내가 가진 보험으로 혜택을 받을 수 있는지 모르는 사람을 위해 만들었습니다.
 
----
+## 📂 앱 위치
 
-## 1. 동작 흐름
+앱 코드와 자세한 설명은 [`insurance-app/`](./insurance-app/) 폴더에 있습니다.
+→ [insurance-app/README.md](./insurance-app/README.md) 참고
 
-```
-config/companies.json (계열사·업종·수신자)
-        │
-        ▼
-  [계열사별 반복]
-   ① Claude 웹 검색으로 업종 내 최신 AI 뉴스 수집
-   ② 뉴스 요약 + 임직원 인사이트 + OpEx 제언(JSON) 생성
-   ③ 한국어 HTML 메일 렌더링
-   ④ Gmail SMTP 로 수신자(TO)/참조자(CC) 발송
-```
-
-## 2. 설치
+## 🚀 빠르게 실행
 
 ```bash
-npm install
+cd insurance-app
+python3 -m http.server 8080
+# 브라우저에서 http://localhost:8080 접속
 ```
 
-## 3. 환경설정
+폰에서 쓰려면 저장소 **Settings → Pages**로 배포한 뒤
+`https://<아이디>.github.io/<저장소>/insurance-app/` 에 접속하고 **"홈 화면에 추가"** 하세요.
 
-### (1) `.env` 작성
+## ✨ 주요 기능
 
-```bash
-cp .env.example .env
-```
+- 📋 내 보험 현황(회사·상품·보험료·보장) 정리
+- 🛡️ 보장 한눈에 보기 (카테고리별)
+- 🔎 상황별 보장 찾기 (암 진단·입원·교통사고 등)
+- 📖 쉬운 용어 사전
+- ⏰ 갱신일·만기 알림
+- 📷 증권 사진 첨부 + OCR 자동입력
+- 🔬 중복 보장·보장 공백 분석
 
-| 변수 | 설명 |
-| --- | --- |
-| `ANTHROPIC_API_KEY` | Claude API 키 (https://platform.claude.com) |
-| `GMAIL_USER` | 보내는 Gmail 주소 |
-| `GMAIL_APP_PASSWORD` | Gmail **앱 비밀번호** (로그인 비밀번호 아님) |
-| `MAIL_FROM_NAME` | (선택) 발신자 표시 이름 |
-| `CLAUDE_MODEL` | (선택) 기본값 `claude-opus-4-8` |
-| `SEND_TIME` | (자동 발송) 매일 발송 시각 `HH:MM` (기본 `08:00`) |
-| `SEND_TIMEZONE` | (자동 발송) 시간대 (기본 `Asia/Seoul`) |
-| `SEND_CRON` | (선택) cron 식 직접 지정 — `SEND_TIME`보다 우선 |
+데이터는 내 기기에만 저장되며 서버로 전송되지 않습니다.
 
-> **Gmail 앱 비밀번호 발급:** Google 계정 → 보안 → 2단계 인증 사용 설정 → "앱 비밀번호" 생성.
-
-### (2) 계열사 설정 작성
-
-```bash
-cp config/companies.example.json config/companies.json
-```
-
-```jsonc
-{
-  "groupName": "범한그룹",
-  "companies": [
-    {
-      "name": "범한산업",
-      "industry": "방위산업 / 잠수함용 연료전지·특수전지 제조",  // ← AI 뉴스 수집 기준
-      "keywords": ["연료전지", "방산", "잠수함"],                 // (선택) 검색 정밀도 향상
-      "recipients": ["lead@beomhan.com"],                         // 수신자(TO)
-      "cc": ["manager@beomhan.com"]                               // 참조자(CC, 선택)
-    }
-  ]
-}
-```
-
-## 4. 실행
-
-```bash
-# 1) 발송 없이 미리보기만 생성 (./out/<계열사>.html) — 먼저 권장
-npm run dev -- --dry-run
-
-# 2) 특정 계열사만
-npm run dev -- --company 범한산업 --dry-run
-
-# 3) 실제 메일 발송 (1회)
-npm run dev
-
-# 옵션 확인
-npm run dev -- --help
-```
-
-### 매일 자동 발송 (스케줄 모드)
-
-`.env` 에 `SEND_TIME`(기본 `08:00`)과 `SEND_TIMEZONE`(기본 `Asia/Seoul`)을 설정한 뒤,
-상주 프로세스로 실행하면 매일 그 시각에 자동 발송합니다.
-
-```bash
-# 매일 SEND_TIME 에 자동 발송 (프로세스 상주)
-npm run schedule
-
-# 시작 즉시 1회 발송 + 이후 매일 반복 (동작 확인용으로 유용)
-npm run dev -- --schedule --run-now
-```
-
-> 24시간 떠 있는 서버가 없다면, **1회 실행 모드(`npm start`)를 OS 스케줄러로 호출**해도 됩니다.
-> - **Linux cron** (매일 08:00):
->   ```
->   0 8 * * *  cd /경로/beomhan-ai-insights && /usr/bin/node dist/index.js >> run.log 2>&1
->   ```
-> - **GitHub Actions / 컨테이너**: `schedule: cron` 으로 `npm start` 를 호출.
-> 이때는 `--schedule` 없이 1회 실행 모드를 쓰며, 시각 제어는 외부 스케줄러가 담당합니다.
-
-빌드 후 실행도 가능합니다.
-
-```bash
-npm run build && npm start -- --dry-run
-```
-
-## 5. 옵션
-
-| 옵션 | 설명 |
-| --- | --- |
-| `--schedule` | 매일 `SEND_TIME` 에 자동 발송 (상주 모드) |
-| `--run-now` | `--schedule` 와 함께: 시작 직후 1회 즉시 실행 |
-| `--config <경로>` | 계열사 설정 파일 경로 (기본 `config/companies.json`) |
-| `--company <이름>` | 이름 부분일치로 특정 계열사만 처리 |
-| `--dry-run` | 발송하지 않고 `./out/` 에 HTML 미리보기 저장 |
-
-## 6. 파일 구조
-
-```
-src/
-  index.ts          CLI 오케스트레이션 (1회 / 스케줄 모드)
-  scheduler.ts      매일 정기 발송 (node-cron, SEND_TIME/SEND_CRON)
-  config.ts         .env / companies.json 로드·검증
-  newsInsights.ts   Claude 웹 검색 → 핫뉴스 선별·요약·인사이트·OpEx(JSON)
-  emailTemplate.ts  한국어 HTML 메일 렌더링
-  mailer.ts         Gmail SMTP 발송
-  types.ts          공통 타입
-config/
-  companies.example.json
-```
-
-## 7. 참고/주의
-
-- `.env`, `config/companies.json`, `out/` 은 `.gitignore` 처리되어 커밋되지 않습니다.
-- 웹 검색·요약 결과는 **참고용**이며, 중요한 의사결정 전 원문 확인과 사내 검토를 권장합니다.
-- 발송 전 항상 `--dry-run` 으로 내용을 검수하세요.
+> ⚠️ 이 앱은 개인 정리용입니다. 실제 보장 여부·금액은 가입한 보험의 약관·증권과 보험사 안내가 기준입니다.
