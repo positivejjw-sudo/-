@@ -232,3 +232,44 @@ main {
   padding: 14px 16px; font-size: 15px; font-weight: 600; cursor: pointer; color: var(--ink);
 }
 .menu-item.danger { color: var(--danger); }
+.menu-state { float: right; font-size: 12px; color: var(--muted); font-weight: 600; }
+
+/* 다가오는 일정 알림 */
+.alert-box { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px; margin-bottom: 14px; }
+.alert-head { font-weight: 700; font-size: 14px; margin-bottom: 8px; }
+.alert-head span { color: var(--muted); font-weight: 600; font-size: 12px; }
+.alert-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px dashed var(--line); }
+.alert-row:first-of-type { border-top: 0; }
+.alert-due { flex: 0 0 auto; min-width: 58px; text-align: center; font-weight: 800; font-size: 12px; padding: 4px 6px; border-radius: 8px; }
+.alert-text { font-size: 13px; }
+.alert-date { color: var(--muted); font-size: 11.5px; margin-left: 4px; }
+.due-red { background: #fee4e2; color: var(--danger); }
+.due-orange { background: #fef0c7; color: var(--warn); }
+.due-soft { background: #eef2f8; color: #475467; }
+.due-over { background: #f2f4f7; color: #98a2b3; }
+.due-chip { font-weight: 700; }
+.due-chip.due-red { color: var(--danger); }
+.due-chip.due-orange { color: var(--warn); }
+
+.detail-dates { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.date-pill { font-size: 11.5px; font-weight: 700; padding: 4px 9px; border-radius: 999px; }
+
+/* 증권 사진 */
+.photo-section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.photo-add { width: 100%; padding: 22px; border-style: dashed !important; color: var(--brand-dark); }
+.photo-preview img { width: 100%; max-height: 240px; object-fit: contain; border-radius: 10px; background: #f3f5f9; }
+.photo-btns { display: flex; gap: 8px; margin-top: 8px; }
+.detail-img { width: 100%; border-radius: 12px; margin-bottom: 12px; background: #f3f5f9; }
+.ocr-text { margin-top: 6px; }
+.ocr-text summary { cursor: pointer; font-weight: 600; }
+.ocr-text pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: #f7f9fd; border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: 200px; overflow: auto; }
+
+/* 중복·공백 분석 */
+.analysis { margin-bottom: 8px; }
+.ana-card { border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--line); background: #fff; }
+.ana-card.warn { background: #fff7ed; border-color: #fde7c8; }
+.ana-card.gap { background: #f4f7ff; border-color: #d9e5ff; }
+.ana-card.good { background: #ecfdf3; border-color: #c8ead7; }
+.ana-title { font-weight: 700; font-size: 14px; }
+.ana-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.ana-note { font-size: 12.5px; color: #475467; margin-top: 7px; background: rgba(255,255,255,.6); border-radius: 8px; padding: 8px; }

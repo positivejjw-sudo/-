@@ -24,6 +24,25 @@ const CATEGORIES = [
 const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.map(c => [c.key, c.label]));
 const CATEGORY_ICON  = Object.fromEntries(CATEGORIES.map(c => [c.key, c.icon]));
 
+/* OCR이 사진에서 회사명을 알아볼 때 참고하는 보험사 목록 */
+const KNOWN_INSURERS = [
+  '삼성생명', '한화생명', '교보생명', '신한라이프', '신한생명', 'NH농협생명', '농협생명',
+  '동양생명', '미래에셋생명', 'KB라이프', 'KB생명', '흥국생명', 'DB생명', '하나생명',
+  'AIA생명', '라이나생명', '메트라이프', '푸본현대생명', 'ABL생명', 'IBK연금보험',
+  '삼성화재', '현대해상', 'DB손해보험', 'KB손해보험', '메리츠화재', '한화손해보험',
+  '롯데손해보험', '흥국화재', 'MG손해보험', 'NH농협손해보험', '농협손해보험',
+  'AXA손해보험', '하나손해보험', '캐롯손해보험', '교보라이프플래닛',
+];
+
+/* "보장 공백" 분석에 쓰는 일반적으로 권장되는 기본 보장 (참고용) */
+const RECOMMENDED_COVERAGE = [
+  { cat: 'actualloss', why: '병원비 전반을 실비로 보전 — 가장 기본이 되는 보장' },
+  { cat: 'diagnosis',  why: '암·뇌·심장 등 큰 병 진단 시 치료비 외 목돈' },
+  { cat: 'death',      why: '피보험자 유고 시 남은 가족의 생활자금' },
+  { cat: 'surgery',    why: '수술비 부담 대비' },
+  { cat: 'hospital',   why: '입원 기간 소득 공백·간병비 보전' },
+];
+
 /* 보험 종류(상품군) — 폼 선택용 */
 const POLICY_TYPES = [
   '실손의료보험', '암보험', '종신보험', '정기보험', '상해보험',
