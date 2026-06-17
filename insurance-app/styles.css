@@ -322,3 +322,17 @@ main {
 .add-step input { flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 14px; font-family: inherit; }
 .add-step .btn-ghost { flex: 0 0 auto; }
 .claims-list { display: flex; flex-direction: column; gap: 2px; }
+
+/* 보험료 대시보드 */
+.summary-btn { text-align: left; cursor: pointer; font: inherit; }
+.summary-btn span { color: var(--brand-dark); }
+.pm-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pm-totals > div { background: var(--brand-soft); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; }
+.pm-totals span { font-size: 12px; color: var(--muted); }
+.pm-totals strong { font-size: 20px; color: var(--brand-dark); }
+.pm-row { margin-bottom: 12px; position: relative; }
+.pm-row-top { display: flex; justify-content: space-between; font-size: 13.5px; }
+.pm-pct { font-size: 11px; color: var(--muted); text-align: right; margin-top: 1px; }
+.pm-policies { list-style: none; padding: 0; margin: 6px 0 0; }
+.pm-policies li { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.pm-policies b { white-space: nowrap; color: var(--brand-dark); }

@@ -270,7 +270,7 @@ function renderPolicies() {
     ${claimsSectionHtml()}
     <div class="summary">
       <div><strong>${list.length}</strong><span>${state.filterInsured === '전체' ? '가입 보험' : esc(state.filterInsured) + ' 보험'}</span></div>
-      <div><strong>${won(Math.round(totalMonthly))}</strong><span>월 보험료(합계)</span></div>
+      <button class="summary-btn" id="premiumBtn"><strong>${won(Math.round(totalMonthly))}</strong><span>월 보험료 합계 · 자세히 ›</span></button>
     </div>
     ${filterChips}
     ${sortBar}
@@ -280,6 +280,7 @@ function renderPolicies() {
   `;
 
   bindClaimsSection();
+  $app.querySelector('#premiumBtn')?.addEventListener('click', openPremiumDashboard);
   $app.querySelectorAll('[data-insured]').forEach(b => b.addEventListener('click', () => {
     state.filterInsured = b.dataset.insured; render();
   }));
@@ -685,6 +686,45 @@ function openBulkImport() {
       alert(`${added.length}건을 등록했어요. 각 보험을 열어 보장 내용을 채워주세요.`);
     });
   });
+}
+
+/* ---------- 보험료 납입 현황 대시보드 ---------- */
+function monthlyOf(p) { return p.premiumCycle === '연' ? (Number(p.premium) || 0) / 12 : (Number(p.premium) || 0); }
+function groupSum(keyFn) {
+  const m = {};
+  state.policies.forEach(p => { const k = keyFn(p) || '미지정'; m[k] = (m[k] || 0) + monthlyOf(p); });
+  return Object.entries(m).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+}
+function barList(entries, total) {
+  const max = Math.max(1, ...entries.map(e => e[1]));
+  return entries.map(([label, v]) => `
+    <div class="pm-row">
+      <div class="pm-row-top"><span>${esc(label)}</span><b>${won(Math.round(v))}</b></div>
+      <div class="bar"><div class="bar-fill" style="width:${Math.round(v / max * 100)}%"></div></div>
+      <div class="pm-pct">${total ? Math.round(v / total * 100) : 0}%</div>
+    </div>`).join('');
+}
+function openPremiumDashboard() {
+  const totalMonthly = state.policies.reduce((s, p) => s + monthlyOf(p), 0);
+  const byMember = groupSum(p => (p.insured || '').trim());
+  const byType = groupSum(p => p.type);
+  const perPolicy = state.policies.map(p => ({ p, m: monthlyOf(p) })).filter(x => x.m > 0).sort((a, b) => b.m - a.m);
+  openModal(`
+    <div class="modal-head"><h2>💳 보험료 납입 현황</h2><button class="icon-btn" data-close>✕</button></div>
+    <div class="pm-totals">
+      <div><span>월 합계</span><strong>${won(Math.round(totalMonthly))}</strong></div>
+      <div><span>연 환산</span><strong>${won(Math.round(totalMonthly * 12))}</strong></div>
+    </div>
+    ${byMember.length ? `<h3 class="sec-h">👨‍👩‍👧 가족(피보험자)별</h3>${barList(byMember, totalMonthly)}` : ''}
+    <h3 class="sec-h">📂 종류별</h3>${barList(byType, totalMonthly)}
+    <h3 class="sec-h">📄 보험별 (월 환산, 높은순)</h3>
+    <ul class="pm-policies">
+      ${perPolicy.map(({ p, m }) => `<li>
+        <span>${esc(p.insurer)} ${esc(p.product)}${p.premiumCycle === '연' ? ' <span class="muted">(연납)</span>' : ''}</span>
+        <b>${won(Math.round(m))}</b></li>`).join('') || '<li class="muted">보험료가 입력된 보험이 없어요.</li>'}
+    </ul>
+    <p class="disclaimer">※ 연납 보험은 월 기준으로 환산해 합산했습니다. 입력한 보험료 기준이며 실제 청구액과 다를 수 있어요.</p>
+  `);
 }
 
 /* === 2) 보장 한눈에 보기 + 중복·공백 분석 === */
