@@ -273,3 +273,66 @@ main {
 .ana-title { font-weight: 700; font-size: 14px; }
 .ana-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 .ana-note { font-size: 12.5px; color: #475467; margin-top: 7px; background: rgba(255,255,255,.6); border-radius: 8px; padding: 8px; }
+
+/* 가족 필터 / 정렬 */
+.filter-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; -webkit-overflow-scrolling: touch; }
+.fchip { flex: 0 0 auto; background: #fff; border: 1px solid var(--line); color: #475467; border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.fchip.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+.sort-bar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.sort-bar label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.sort-bar select { padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 13px; background: #fff; font-family: inherit; }
+
+/* 보장 막대 그래프 */
+.bar { height: 7px; background: #eef1f6; border-radius: 99px; margin: 8px 0 2px; overflow: hidden; }
+.bar-fill { height: 100%; background: linear-gradient(90deg, var(--brand), #5b9bff); border-radius: 99px; }
+
+/* 금액 미리보기 */
+.amt-wrap { position: relative; display: flex; flex-direction: column; }
+.cov-amt-prev { font-size: 11px; color: var(--brand-dark); font-weight: 700; padding: 2px 2px 0; min-height: 13px; }
+.cov-head-btns { display: flex; gap: 6px; }
+.cov-head-btns .btn-ghost { flex: 0 0 auto; }
+
+/* 일괄 가져오기 */
+.info-card { background: #f4f7ff; border: 1px solid #d9e5ff; border-radius: 12px; padding: 12px 14px; font-size: 13px; }
+.info-card a { color: var(--brand-dark); font-weight: 700; }
+.bulk-text { width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; font-family: inherit; margin-top: 10px; }
+.bulk-row { display: grid; grid-template-columns: 1fr 1.4fr 1fr auto; gap: 6px; margin-bottom: 6px; }
+.bulk-row input, .bulk-row select { padding: 9px 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; font-family: inherit; min-width: 0; }
+.bulk-row .b-del { padding: 7px 10px; }
+
+/* 청구 도우미 */
+.claims-box { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px; margin-bottom: 14px; }
+.claim-row { display: flex; align-items: center; gap: 10px; width: 100%; background: #f7f9fd; border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; margin-top: 8px; cursor: pointer; text-align: left; }
+.claim-row:first-of-type { margin-top: 6px; }
+.claim-ico { font-size: 20px; }
+.claim-text { flex: 1; display: flex; flex-direction: column; }
+.claim-text b { font-size: 14px; }
+.claim-prog { font-size: 12px; color: var(--muted); }
+.btn-primary.wide { width: 100%; margin-top: 10px; }
+.claim-meta { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.claim-status { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.claim-status select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; font-family: inherit; }
+.checklist { list-style: none; padding: 0; margin: 6px 0; }
+.checklist li { display: flex; align-items: flex-start; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.checklist li.done span { text-decoration: line-through; color: var(--muted); }
+.checklist .chk { background: none; border: 0; font-size: 20px; cursor: pointer; color: var(--brand); line-height: 1.2; flex: 0 0 auto; }
+.checklist li span { flex: 1; font-size: 14px; }
+.checklist .step-del { background: none; border: 0; color: #cbd2de; font-size: 14px; cursor: pointer; flex: 0 0 auto; }
+.add-step { display: flex; gap: 6px; margin: 8px 0 4px; }
+.add-step input { flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 14px; font-family: inherit; }
+.add-step .btn-ghost { flex: 0 0 auto; }
+.claims-list { display: flex; flex-direction: column; gap: 2px; }
+
+/* 보험료 대시보드 */
+.summary-btn { text-align: left; cursor: pointer; font: inherit; }
+.summary-btn span { color: var(--brand-dark); }
+.pm-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pm-totals > div { background: var(--brand-soft); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; }
+.pm-totals span { font-size: 12px; color: var(--muted); }
+.pm-totals strong { font-size: 20px; color: var(--brand-dark); }
+.pm-row { margin-bottom: 12px; position: relative; }
+.pm-row-top { display: flex; justify-content: space-between; font-size: 13.5px; }
+.pm-pct { font-size: 11px; color: var(--muted); text-align: right; margin-top: 1px; }
+.pm-policies { list-style: none; padding: 0; margin: 6px 0 0; }
+.pm-policies li { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.pm-policies b { white-space: nowrap; color: var(--brand-dark); }

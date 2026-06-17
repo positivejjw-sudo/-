@@ -1,11 +1,12 @@
 /* =========================================================================
  * app.js — 내 보험 한눈에 (PWA)
- *  - 보험 데이터는 브라우저(localStorage)에, 증권 사진은 IndexedDB에 저장됩니다.
+ *  - 보험 데이터·청구기록은 localStorage, 증권 사진은 IndexedDB에 저장됩니다.
  *  - 어떤 정보도 서버로 전송되지 않습니다.
  * =======================================================================*/
 'use strict';
 
 const STORE_KEY = 'myInsurance.policies.v1';
+const CLAIMS_KEY = 'myInsurance.claims.v1';
 const $app = document.getElementById('app');
 const $title = document.getElementById('screenTitle');
 const $modalRoot = document.getElementById('modalRoot');
@@ -14,9 +15,14 @@ const $fab = document.getElementById('fab');
 let state = {
   tab: 'policies',
   policies: loadPolicies(),
+  claims: loadClaims(),
+  filterInsured: '전체',
+  sort: 'default',
 };
 
-/* ---------- 저장소 (보험 데이터) ---------- */
+const CLAIM_STATUSES = ['준비 중', '접수함', '심사 중', '지급 완료'];
+
+/* ---------- 저장소 ---------- */
 function loadPolicies() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -27,6 +33,13 @@ function loadPolicies() {
 function savePolicies() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state.policies)); }
   catch (e) { alert('저장 공간이 부족하거나 비공개 모드일 수 있어요.'); }
+}
+function loadClaims() {
+  try { return JSON.parse(localStorage.getItem(CLAIMS_KEY)) || []; }
+  catch (e) { return []; }
+}
+function saveClaims() {
+  try { localStorage.setItem(CLAIMS_KEY, JSON.stringify(state.claims)); } catch (e) {}
 }
 function structuredCloneSafe(o) { return JSON.parse(JSON.stringify(o)); }
 
@@ -85,7 +98,7 @@ function won(n) {
   return v.toLocaleString('ko-KR') + '원';
 }
 
-/* ---------- 날짜 / 일정 계산 ---------- */
+/* ---------- 날짜 / 일정 ---------- */
 function daysUntil(s) {
   if (!s) return null;
   const d = new Date(s); if (isNaN(d)) return null;
@@ -116,9 +129,9 @@ function policyEvents(p) {
   }
   return evs;
 }
-function upcomingEvents(minDays = -30, maxDays = 120) {
+function upcomingEvents(minDays = -30, maxDays = 120, pool = state.policies) {
   const all = [];
-  state.policies.forEach(p => policyEvents(p).forEach(e => all.push(e)));
+  pool.forEach(p => policyEvents(p).forEach(e => all.push(e)));
   return all.filter(e => e.days >= minDays && e.days <= maxDays).sort((a, b) => a.days - b.days);
 }
 function dueClass(days) { return days < 0 ? 'due-over' : days <= 7 ? 'due-red' : days <= 30 ? 'due-orange' : 'due-soft'; }
@@ -156,19 +169,62 @@ function emptyState(text, hint) {
   </div>`;
 }
 
+/* ---------- 가족(피보험자) / 정렬 ---------- */
+function insuredList() {
+  const set = [];
+  state.policies.forEach(p => { const v = (p.insured || '').trim(); if (v && !set.includes(v)) set.push(v); });
+  return set;
+}
+function applyFilterSort(list) {
+  let out = state.filterInsured === '전체'
+    ? list.slice()
+    : list.filter(p => (p.insured || '').trim() === state.filterInsured);
+  const monthly = p => p.premiumCycle === '연' ? (Number(p.premium) || 0) / 12 : (Number(p.premium) || 0);
+  const nextDue = p => { const e = policyEvents(p).filter(x => x.days >= 0).sort((a, b) => a.days - b.days)[0]; return e ? e.days : Infinity; };
+  if (state.sort === 'premium') out.sort((a, b) => monthly(b) - monthly(a));
+  else if (state.sort === 'due') out.sort((a, b) => nextDue(a) - nextDue(b));
+  else if (state.sort === 'insurer') out.sort((a, b) => (a.insurer || '').localeCompare(b.insurer || '', 'ko'));
+  else if (state.sort === 'start') out.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+  return out;
+}
+
 /* === 1) 내 보험 목록 === */
 function renderPolicies() {
-  const list = state.policies;
-  if (!list.length) {
-    $app.innerHTML = emptyState('아직 등록된 보험이 없어요', '오른쪽 아래 ＋ 버튼으로 내 보험을 추가해 보세요.');
+  const all = state.policies;
+  if (!all.length) {
+    $app.innerHTML = `${claimsSectionHtml()}` + emptyState('아직 등록된 보험이 없어요',
+      '오른쪽 아래 ＋ 버튼으로 추가하거나, 위 ⋯ 메뉴의 "보험 목록 한번에 가져오기"를 써보세요.');
+    bindClaimsSection();
     return;
   }
+  const list = applyFilterSort(all);
   const totalMonthly = list.reduce((s, p) => {
     const m = p.premiumCycle === '연' ? (Number(p.premium) || 0) / 12 : (Number(p.premium) || 0);
     return s + m;
   }, 0);
 
-  const up = upcomingEvents();
+  // 가족 필터 칩
+  const members = insuredList();
+  const filterChips = members.length > 1 ? `
+    <div class="filter-bar">
+      ${['전체', ...members].map(m =>
+        `<button class="fchip ${state.filterInsured === m ? 'on' : ''}" data-insured="${esc(m)}">${esc(m)}</button>`).join('')}
+    </div>` : '';
+
+  const sortBar = `
+    <div class="sort-bar">
+      <label>정렬
+        <select id="sortSel">
+          <option value="default" ${state.sort==='default'?'selected':''}>기본</option>
+          <option value="due" ${state.sort==='due'?'selected':''}>갱신·만기 임박순</option>
+          <option value="premium" ${state.sort==='premium'?'selected':''}>보험료 높은순</option>
+          <option value="insurer" ${state.sort==='insurer'?'selected':''}>회사명순</option>
+          <option value="start" ${state.sort==='start'?'selected':''}>최근 가입순</option>
+        </select>
+      </label>
+    </div>`;
+
+  const up = upcomingEvents(-30, 120, list);
   const alertHtml = up.length ? `
     <section class="alert-box">
       <div class="alert-head">⏰ 다가오는 일정 <span>${up.length}건</span></div>
@@ -183,8 +239,7 @@ function renderPolicies() {
   const cards = list.map(p => {
     const covCount = (p.coverages || []).length;
     const tags = (p.coverages || []).slice(0, 4).map(c =>
-      `<span class="chip">${CATEGORY_ICON[c.category] || '•'} ${esc(c.name)}</span>`
-    ).join('');
+      `<span class="chip">${CATEGORY_ICON[c.category] || '•'} ${esc(c.name)}</span>`).join('');
     const more = covCount > 4 ? `<span class="chip chip-more">+${covCount - 4}</span>` : '';
     const ev = policyEvents(p).filter(e => e.days >= -30 && e.days <= 120).sort((a, b) => a.days - b.days)[0];
     const dueChip = ev ? `<span class="chip due-chip ${dueClass(ev.days)}">⏰ ${esc(ev.type)} ${dueLabel(ev.days)}</span>` : '';
@@ -197,6 +252,7 @@ function renderPolicies() {
         <span class="badge">${esc(p.type || '기타')}</span>
       </div>
       <div class="card-meta">
+        ${p.insured ? `<span>👤 ${esc(p.insured)}</span>` : ''}
         ${p.renewal ? `<span>🔁 ${esc(p.renewal)}</span>` : ''}
         ${p.premium ? `<span>💳 ${won(p.premium)}/${esc(p.premiumCycle || '월')}</span>` : ''}
         ${p.startDate ? `<span>📅 ${esc(p.startDate)} 개시</span>` : ''}
@@ -211,15 +267,25 @@ function renderPolicies() {
   }).join('');
 
   $app.innerHTML = `
+    ${claimsSectionHtml()}
     <div class="summary">
-      <div><strong>${list.length}</strong><span>가입 보험</span></div>
-      <div><strong>${won(Math.round(totalMonthly))}</strong><span>월 보험료(합계)</span></div>
+      <div><strong>${list.length}</strong><span>${state.filterInsured === '전체' ? '가입 보험' : esc(state.filterInsured) + ' 보험'}</span></div>
+      <button class="summary-btn" id="premiumBtn"><strong>${won(Math.round(totalMonthly))}</strong><span>월 보험료 합계 · 자세히 ›</span></button>
     </div>
+    ${filterChips}
+    ${sortBar}
     ${alertHtml}
     <div class="cards">${cards}</div>
     <p class="disclaimer">※ 실제 보장 여부·금액은 가입한 보험의 약관/증권 및 보험사 안내가 기준입니다. 이 앱은 개인 정리용입니다.</p>
   `;
 
+  bindClaimsSection();
+  $app.querySelector('#premiumBtn')?.addEventListener('click', openPremiumDashboard);
+  $app.querySelectorAll('[data-insured]').forEach(b => b.addEventListener('click', () => {
+    state.filterInsured = b.dataset.insured; render();
+  }));
+  const sortSel = $app.querySelector('#sortSel');
+  if (sortSel) sortSel.addEventListener('change', () => { state.sort = sortSel.value; render(); });
   $app.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
     const id = b.dataset.id, act = b.dataset.act;
     if (act === 'edit') openPolicyForm(id);
@@ -250,7 +316,6 @@ async function openPolicyDetail(id) {
     </tr>
     ${c.note ? `<tr class="note-row"><td></td><td colspan="2">↳ ${esc(c.note)}</td></tr>` : ''}
   `).join('') || `<tr><td colspan="3" class="muted">등록된 보장이 없어요. 수정에서 추가하세요.</td></tr>`;
-
   const ev = policyEvents(p).sort((a, b) => a.days - b.days);
 
   openModal(`
@@ -260,6 +325,7 @@ async function openPolicyDetail(id) {
     </div>
     <div class="detail-meta">
       <span class="badge">${esc(p.type || '기타')}</span>
+      ${p.insured ? `<span class="badge soft">👤 ${esc(p.insured)}</span>` : ''}
       ${p.renewal ? `<span class="badge soft">🔁 ${esc(p.renewal)}</span>` : ''}
       ${p.policyNo ? `<span class="badge soft">증권 ${esc(p.policyNo)}</span>` : ''}
     </div>
@@ -276,7 +342,6 @@ async function openPolicyDetail(id) {
     </div>
   `);
   $modalRoot.querySelector('[data-edit]')?.addEventListener('click', () => { closeModal(); openPolicyForm(id); });
-
   if (p.hasPhoto) {
     const photo = await getPhoto(id);
     const box = $modalRoot.querySelector('#detailPhoto');
@@ -293,11 +358,11 @@ async function openPolicyForm(id) {
         insured: '본인', contractor: '본인', startDate: '', renewal: '비갱신형',
         maturityDate: '', renewalDate: '', premium: '', premiumCycle: '월', memo: '', coverages: [] };
 
-  // 사진 상태 (폼 닫을 때까지 메모리에서만 관리)
   let photoData = editing && p.hasPhoto ? await getPhoto(p.id) : null;
   let photoDirty = false;
 
   const typeOpts = POLICY_TYPES.map(t => `<option ${p.type === t ? 'selected' : ''}>${t}</option>`).join('');
+  const insurerOpts = KNOWN_INSURERS.map(n => `<option value="${esc(n)}"></option>`).join('');
   const catOpts = (sel) => CATEGORIES.map(c =>
     `<option value="${c.key}" ${sel === c.key ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('');
 
@@ -305,7 +370,10 @@ async function openPolicyForm(id) {
     return `<div class="cov-row" data-cid="${c.id}">
       <select class="cov-cat">${catOpts(c.category)}</select>
       <input class="cov-name" placeholder="보장명 (예: 암진단비)" value="${esc(c.name)}" />
-      <input class="cov-amt" type="number" inputmode="numeric" placeholder="금액(원)" value="${esc(c.amount)}" />
+      <div class="amt-wrap">
+        <input class="cov-amt" type="number" inputmode="numeric" placeholder="금액(원)" value="${esc(c.amount)}" />
+        <span class="cov-amt-prev">${c.amount ? won(c.amount) : ''}</span>
+      </div>
       <input class="cov-note" placeholder="메모 (예: 90일 면책, 본인부담 20%)" value="${esc(c.note)}" />
       <button type="button" class="btn-ghost danger cov-del">삭제</button>
     </div>`;
@@ -317,24 +385,29 @@ async function openPolicyForm(id) {
       <button class="icon-btn" data-close>✕</button>
     </div>
     <form id="policyForm" class="form">
-
       <div class="photo-section">
         <div class="cov-head"><h3>📎 증권 사진</h3></div>
-        <p class="hint">증권/보장내용 화면을 찍어두면 나중에 확인하기 편해요. 사진에서 글자를 읽어 자동 입력도 시도할 수 있어요.</p>
+        <p class="hint">증권/보장내용 화면을 찍어두면 확인이 편해요. 사진에서 글자를 읽어 자동 입력도 시도할 수 있어요.</p>
         <div id="photoArea"></div>
         <input type="file" id="photoInput" accept="image/*" capture="environment" hidden />
       </div>
 
-      <label>보험회사 <input name="insurer" value="${esc(p.insurer)}" placeholder="예: 삼성생명, 현대해상" required /></label>
+      <label>보험회사 <input name="insurer" list="insurerList" value="${esc(p.insurer)}" placeholder="입력하면 회사명이 자동 추천돼요" required /></label>
+      <datalist id="insurerList">${insurerOpts}</datalist>
       <label>상품명 <input name="product" value="${esc(p.product)}" placeholder="예: 든든한 암보험" /></label>
       <div class="grid2">
         <label>종류 <select name="type">${typeOpts}</select></label>
+        <label>피보험자 <input name="insured" list="insuredList" value="${esc(p.insured)}" placeholder="예: 본인, 배우자, 자녀" /></label>
+      </div>
+      <datalist id="insuredList">${['본인','배우자','자녀','부모','자녀1','자녀2'].map(v => `<option value="${v}"></option>`).join('')}</datalist>
+      <div class="grid2">
         <label>갱신여부
           <select name="renewal">
             ${['비갱신형','갱신형(1년)','갱신형(3년)','갱신형(5년)','갱신형(10년)','모름'].map(r =>
               `<option ${p.renewal === r ? 'selected' : ''}>${r}</option>`).join('')}
           </select>
         </label>
+        <label>계약자 <input name="contractor" value="${esc(p.contractor)}" placeholder="예: 본인" /></label>
       </div>
       <div class="grid2">
         <label>보험료(원) <input name="premium" type="number" inputmode="numeric" value="${esc(p.premium)}" placeholder="예: 65000" /></label>
@@ -353,17 +426,16 @@ async function openPolicyForm(id) {
         <label>다음 갱신일 <input name="renewalDate" type="date" value="${esc(p.renewalDate)}" /></label>
         <label>증권번호 <input name="policyNo" value="${esc(p.policyNo)}" placeholder="선택" /></label>
       </div>
-      <p class="hint">만기일·갱신일을 넣으면 "다가오는 일정"으로 미리 알려드려요. (갱신주기를 고르면 다음 갱신일은 자동 추정)</p>
-      <div class="grid2">
-        <label>피보험자 <input name="insured" value="${esc(p.insured)}" placeholder="예: 본인, 자녀" /></label>
-        <label>계약자 <input name="contractor" value="${esc(p.contractor)}" placeholder="예: 본인" /></label>
-      </div>
+      <p class="hint">만기일·갱신일을 넣으면 "다가오는 일정"으로 알려드려요. (갱신주기를 고르면 다음 갱신일은 자동 추정)</p>
 
       <div class="cov-head">
         <h3>보장 내용</h3>
-        <button type="button" class="btn-ghost" id="addCov">＋ 보장 추가</button>
+        <div class="cov-head-btns">
+          <button type="button" class="btn-ghost" id="tplBtn">🧩 템플릿</button>
+          <button type="button" class="btn-ghost" id="addCov">＋ 보장</button>
+        </div>
       </div>
-      <p class="hint">증권에 적힌 특약(보장)을 하나씩 추가하세요. 잘 모르면 보험사 앱의 "보장내용 조회"로 확인할 수 있어요.</p>
+      <p class="hint">"🧩 템플릿"을 누르면 선택한 종류에 흔한 보장이 자동으로 채워져요. 금액만 증권 보고 채우면 됩니다.</p>
       <div id="covList">${(p.coverages || []).map(covRow).join('')}</div>
 
       <label>메모 <textarea name="memo" rows="2" placeholder="기억할 점 (예: 콜센터 1588-0000)">${esc(p.memo)}</textarea></label>
@@ -375,7 +447,18 @@ async function openPolicyForm(id) {
     </form>
   `);
 
-  /* --- 사진 영역 렌더 --- */
+  const form = $modalRoot.querySelector('#policyForm');
+  const covList = $modalRoot.querySelector('#covList');
+
+  /* 금액 미리보기 */
+  covList.addEventListener('input', e => {
+    if (e.target.classList.contains('cov-amt')) {
+      const prev = e.target.parentElement.querySelector('.cov-amt-prev');
+      if (prev) prev.textContent = won(e.target.value);
+    }
+  });
+
+  /* 사진 영역 */
   const photoArea = $modalRoot.querySelector('#photoArea');
   const photoInput = $modalRoot.querySelector('#photoInput');
   function drawPhoto() {
@@ -397,54 +480,59 @@ async function openPolicyForm(id) {
   photoInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    try {
-      photoData = await fileToResizedDataUrl(file);
-      photoDirty = true;
-      drawPhoto();
-    } catch (err) { alert('사진을 불러오지 못했어요.'); }
+    try { photoData = await fileToResizedDataUrl(file); photoDirty = true; drawPhoto(); }
+    catch (err) { alert('사진을 불러오지 못했어요.'); }
     photoInput.value = '';
   };
   drawPhoto();
 
-  /* --- OCR 실행 --- */
   async function runOcrFlow() {
     const status = $modalRoot.querySelector('#ocrStatus');
-    const f = $modalRoot.querySelector('#policyForm');
     status.textContent = '글자 인식 준비 중… (처음엔 시간이 걸려요)';
     try {
       const text = await runOcr(photoData, m => {
         if (m && m.status === 'recognizing text') status.textContent = `인식 중… ${Math.round((m.progress || 0) * 100)}%`;
       });
       const parsed = parseOcr(text);
-      let filled = [];
-      if (parsed.insurer && !f.insurer.value) { f.insurer.value = parsed.insurer; filled.push('회사명'); }
-      if (parsed.product && !f.product.value) { f.product.value = parsed.product; filled.push('상품명'); }
-      if (parsed.policyNo && !f.policyNo.value) { f.policyNo.value = parsed.policyNo; filled.push('증권번호'); }
+      const filled = [];
+      if (parsed.insurer && !form.insurer.value) { form.insurer.value = parsed.insurer; filled.push('회사명'); }
+      if (parsed.product && !form.product.value) { form.product.value = parsed.product; filled.push('상품명'); }
+      if (parsed.policyNo && !form.policyNo.value) { form.policyNo.value = parsed.policyNo; filled.push('증권번호'); }
       status.innerHTML = filled.length
         ? `✅ 자동 입력: ${filled.join(', ')} — 값이 맞는지 확인하고 고치세요.`
         : '인식은 됐지만 자동으로 채울 항목을 못 찾았어요. 아래 인식된 글자를 참고해 직접 입력하세요.';
-      if (text.trim()) {
-        status.innerHTML += `<details class="ocr-text"><summary>인식된 글자 전체 보기</summary><pre>${esc(text)}</pre></details>`;
-      }
+      if (text.trim()) status.innerHTML += `<details class="ocr-text"><summary>인식된 글자 전체 보기</summary><pre>${esc(text)}</pre></details>`;
     } catch (err) {
       status.innerHTML = '⚠️ 글자 인식 기능을 불러오지 못했어요(인터넷 연결이 필요합니다). 직접 입력해 주세요.';
     }
   }
 
-  /* --- 보장 행 --- */
-  const covList = $modalRoot.querySelector('#covList');
+  /* 보장 행 추가/삭제 + 템플릿 */
+  function bindCovDel() {
+    covList.querySelectorAll('.cov-del').forEach(b => { b.onclick = () => b.closest('.cov-row').remove(); });
+  }
   $modalRoot.querySelector('#addCov').addEventListener('click', () => {
     covList.insertAdjacentHTML('beforeend', covRow());
     bindCovDel();
     covList.lastElementChild.querySelector('.cov-name').focus();
   });
-  function bindCovDel() {
-    covList.querySelectorAll('.cov-del').forEach(b => { b.onclick = () => b.closest('.cov-row').remove(); });
-  }
+  $modalRoot.querySelector('#tplBtn').addEventListener('click', () => {
+    const tpl = COVERAGE_TEMPLATES[form.type.value];
+    if (!tpl) { alert('이 종류는 준비된 템플릿이 없어요. "＋ 보장"으로 직접 추가하세요.'); return; }
+    const existing = new Set([...covList.querySelectorAll('.cov-name')].map(i => i.value.trim()).filter(Boolean));
+    let added = 0;
+    tpl.forEach(t => {
+      if (existing.has(t.name)) return;
+      covList.insertAdjacentHTML('beforeend', covRow({ id: uid(), category: t.category, name: t.name, amount: '', note: t.note || '' }));
+      added++;
+    });
+    bindCovDel();
+    if (!added) alert('이미 템플릿 보장이 모두 들어 있어요.');
+  });
   bindCovDel();
 
-  /* --- 저장 --- */
-  $modalRoot.querySelector('#policyForm').addEventListener('submit', async e => {
+  /* 저장 */
+  form.addEventListener('submit', async e => {
     e.preventDefault();
     const f = e.target;
     const coverages = [...covList.querySelectorAll('.cov-row')].map(row => ({
@@ -457,34 +545,18 @@ async function openPolicyForm(id) {
 
     const updated = {
       id: p.id,
-      insurer: f.insurer.value.trim(),
-      product: f.product.value.trim(),
-      type: f.type.value,
-      renewal: f.renewal.value,
-      premium: f.premium.value,
-      premiumCycle: f.premiumCycle.value,
-      startDate: f.startDate.value,
-      maturityDate: f.maturityDate.value,
-      renewalDate: f.renewalDate.value,
-      policyNo: f.policyNo.value.trim(),
-      insured: f.insured.value.trim(),
-      contractor: f.contractor.value.trim(),
-      memo: f.memo.value.trim(),
-      coverages,
-      hasPhoto: !!photoData,
+      insurer: f.insurer.value.trim(), product: f.product.value.trim(), type: f.type.value,
+      renewal: f.renewal.value, premium: f.premium.value, premiumCycle: f.premiumCycle.value,
+      startDate: f.startDate.value, maturityDate: f.maturityDate.value, renewalDate: f.renewalDate.value,
+      policyNo: f.policyNo.value.trim(), insured: f.insured.value.trim(), contractor: f.contractor.value.trim(),
+      memo: f.memo.value.trim(), coverages, hasPhoto: !!photoData,
     };
-
     if (photoDirty) {
       if (photoData) { try { await putPhoto(p.id, photoData); } catch (e2) { alert('사진 저장 공간이 부족할 수 있어요.'); } }
       else await delPhoto(p.id);
     }
-
-    if (editing) {
-      const i = state.policies.findIndex(x => x.id === p.id);
-      state.policies[i] = updated;
-    } else {
-      state.policies.push(updated);
-    }
+    if (editing) { const i = state.policies.findIndex(x => x.id === p.id); state.policies[i] = updated; }
+    else state.policies.push(updated);
     savePolicies();
     closeModal();
     setTab('policies');
@@ -504,8 +576,7 @@ function fileToResizedDataUrl(file, maxDim = 1280, quality = 0.72) {
       c.getContext('2d').drawImage(img, 0, 0, w, h);
       res(c.toDataURL('image/jpeg', quality));
     };
-    img.onerror = rej;
-    img.src = url;
+    img.onerror = rej; img.src = url;
   });
 }
 function loadTesseract() {
@@ -513,8 +584,7 @@ function loadTesseract() {
   return new Promise((res, rej) => {
     const s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    s.onload = () => res(window.Tesseract);
-    s.onerror = rej;
+    s.onload = () => res(window.Tesseract); s.onerror = rej;
     document.head.appendChild(s);
   });
 }
@@ -532,6 +602,129 @@ function parseOcr(text) {
   const prod = lines.find(l => /보험/.test(l) && l.length <= 25 && !/회사|증권|약관|주식회사/.test(l));
   if (prod) out.product = prod;
   return out;
+}
+
+/* ---------- 보험 목록 한번에 가져오기 (반자동 등록) ---------- */
+function detectType(line) {
+  const map = [
+    ['실손', '실손의료보험'], ['실비', '실손의료보험'],
+    ['암', '암보험'], ['종신', '종신보험'], ['정기', '정기보험'],
+    ['운전자', '운전자보험'], ['자동차', '자동차보험'], ['화재', '화재보험'],
+    ['치아', '치아보험'], ['간병', '간병/장기요양보험'], ['요양', '간병/장기요양보험'],
+    ['어린이', '어린이보험'], ['자녀', '어린이보험'], ['태아', '어린이보험'],
+    ['연금', '연금/저축보험'], ['저축', '연금/저축보험'],
+    ['상해', '상해보험'], ['건강', '질병보험'], ['질병', '질병보험'],
+  ];
+  for (const [kw, t] of map) if (line.includes(kw)) return t;
+  return '기타';
+}
+function parseBulkText(text) {
+  return text.split(/\n+/).map(l => l.trim()).filter(l => l.length >= 2 && /[가-힣A-Za-z]/.test(l)).map(line => {
+    let insurer = '';
+    for (const n of KNOWN_INSURERS) { if (line.includes(n)) { insurer = n; break; } }
+    let product = line;
+    if (insurer) product = line.replace(insurer, '').trim();
+    product = product.replace(/^[\-·•\s,|]+/, '').replace(/[\-·•\s,|]+$/, '').trim();
+    return { insurer, product, type: detectType(line) };
+  });
+}
+function openBulkImport() {
+  openModal(`
+    <div class="modal-head"><h2>📥 보험 목록 한번에 가져오기</h2><button class="icon-btn" data-close>✕</button></div>
+    <div class="info-card">
+      <p><b>진짜 "자동 조회"는 마이데이터 사업자(토스·뱅크샐러드 등)만 가능</b>해요. 이 앱은 폰에만 저장되는 개인 도구라 보험사에서 직접 끌어오진 못합니다. 대신 아래 방법으로 <b>한 번에 여러 건</b>을 등록할 수 있어요.</p>
+      <ol class="steps">
+        <li><b>내보험찾아줌</b>(보험협회 공식)에서 내 전체 보험 목록을 확인 →
+          <a href="https://cont.insure.or.kr/" target="_blank" rel="noopener">내보험찾아줌 열기 ↗</a></li>
+        <li>또는 보험사 앱의 "보유계약 목록" 화면을 봅니다.</li>
+        <li>회사·상품 목록을 <b>복사해서 아래에 붙여넣고</b> "분석하기"를 누르세요. (한 줄에 한 보험)</li>
+      </ol>
+    </div>
+    <textarea id="bulkText" class="bulk-text" rows="6" placeholder="예)&#10;삼성생명 더건강한종신보험&#10;현대해상 굿앤굿실손의료비&#10;DB손해보험 참좋은운전자보험"></textarea>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost" data-close>취소</button>
+      <button type="button" class="btn-primary" id="bulkParse">분석하기</button>
+    </div>
+    <div id="bulkPreview"></div>
+  `);
+  $modalRoot.querySelector('#bulkParse').addEventListener('click', () => {
+    const text = $modalRoot.querySelector('#bulkText').value;
+    const rows = parseBulkText(text);
+    const box = $modalRoot.querySelector('#bulkPreview');
+    if (!rows.length) { box.innerHTML = `<p class="hint">인식할 줄이 없어요. 한 줄에 하나씩 "회사 상품명"을 붙여넣어 보세요.</p>`; return; }
+    const typeSel = (sel) => POLICY_TYPES.map(t => `<option ${sel === t ? 'selected' : ''}>${t}</option>`).join('');
+    box.innerHTML = `
+      <h3 class="sec-h">미리보기 (${rows.length}건) — 확인 후 고치고 등록하세요</h3>
+      <div id="bulkRows">${rows.map((r, i) => `
+        <div class="bulk-row" data-i="${i}">
+          <input class="b-insurer" list="insurerList2" value="${esc(r.insurer)}" placeholder="회사" />
+          <input class="b-product" value="${esc(r.product)}" placeholder="상품명" />
+          <select class="b-type">${typeSel(r.type)}</select>
+          <button type="button" class="btn-ghost danger b-del">✕</button>
+        </div>`).join('')}</div>
+      <datalist id="insurerList2">${KNOWN_INSURERS.map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>
+      <div class="modal-foot">
+        <button type="button" class="btn-primary" id="bulkAdd">＋ ${rows.length}건 모두 등록</button>
+      </div>
+      <p class="hint">등록 후 각 보험을 열어 보장 내용·금액을 채우면 됩니다. (종류별 "🧩 템플릿" 활용)</p>`;
+    box.querySelectorAll('.b-del').forEach(b => b.addEventListener('click', () => b.closest('.bulk-row').remove()));
+    box.querySelector('#bulkAdd').addEventListener('click', () => {
+      const added = [...box.querySelectorAll('.bulk-row')].map(row => ({
+        insurer: row.querySelector('.b-insurer').value.trim(),
+        product: row.querySelector('.b-product').value.trim(),
+        type: row.querySelector('.b-type').value,
+      })).filter(r => r.insurer || r.product);
+      if (!added.length) { alert('등록할 항목이 없어요.'); return; }
+      added.forEach(r => state.policies.push({
+        id: uid(), insurer: r.insurer, product: r.product, type: r.type, policyNo: '',
+        insured: '본인', contractor: '본인', startDate: '', renewal: '모름',
+        maturityDate: '', renewalDate: '', premium: '', premiumCycle: '월', memo: '', coverages: [],
+      }));
+      savePolicies();
+      closeModal();
+      setTab('policies');
+      alert(`${added.length}건을 등록했어요. 각 보험을 열어 보장 내용을 채워주세요.`);
+    });
+  });
+}
+
+/* ---------- 보험료 납입 현황 대시보드 ---------- */
+function monthlyOf(p) { return p.premiumCycle === '연' ? (Number(p.premium) || 0) / 12 : (Number(p.premium) || 0); }
+function groupSum(keyFn) {
+  const m = {};
+  state.policies.forEach(p => { const k = keyFn(p) || '미지정'; m[k] = (m[k] || 0) + monthlyOf(p); });
+  return Object.entries(m).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+}
+function barList(entries, total) {
+  const max = Math.max(1, ...entries.map(e => e[1]));
+  return entries.map(([label, v]) => `
+    <div class="pm-row">
+      <div class="pm-row-top"><span>${esc(label)}</span><b>${won(Math.round(v))}</b></div>
+      <div class="bar"><div class="bar-fill" style="width:${Math.round(v / max * 100)}%"></div></div>
+      <div class="pm-pct">${total ? Math.round(v / total * 100) : 0}%</div>
+    </div>`).join('');
+}
+function openPremiumDashboard() {
+  const totalMonthly = state.policies.reduce((s, p) => s + monthlyOf(p), 0);
+  const byMember = groupSum(p => (p.insured || '').trim());
+  const byType = groupSum(p => p.type);
+  const perPolicy = state.policies.map(p => ({ p, m: monthlyOf(p) })).filter(x => x.m > 0).sort((a, b) => b.m - a.m);
+  openModal(`
+    <div class="modal-head"><h2>💳 보험료 납입 현황</h2><button class="icon-btn" data-close>✕</button></div>
+    <div class="pm-totals">
+      <div><span>월 합계</span><strong>${won(Math.round(totalMonthly))}</strong></div>
+      <div><span>연 환산</span><strong>${won(Math.round(totalMonthly * 12))}</strong></div>
+    </div>
+    ${byMember.length ? `<h3 class="sec-h">👨‍👩‍👧 가족(피보험자)별</h3>${barList(byMember, totalMonthly)}` : ''}
+    <h3 class="sec-h">📂 종류별</h3>${barList(byType, totalMonthly)}
+    <h3 class="sec-h">📄 보험별 (월 환산, 높은순)</h3>
+    <ul class="pm-policies">
+      ${perPolicy.map(({ p, m }) => `<li>
+        <span>${esc(p.insurer)} ${esc(p.product)}${p.premiumCycle === '연' ? ' <span class="muted">(연납)</span>' : ''}</span>
+        <b>${won(Math.round(m))}</b></li>`).join('') || '<li class="muted">보험료가 입력된 보험이 없어요.</li>'}
+    </ul>
+    <p class="disclaimer">※ 연납 보험은 월 기준으로 환산해 합산했습니다. 입력한 보험료 기준이며 실제 청구액과 다를 수 있어요.</p>
+  `);
 }
 
 /* === 2) 보장 한눈에 보기 + 중복·공백 분석 === */
@@ -567,7 +760,7 @@ function renderAnalysis() {
   return `<section class="analysis">
     <h3 class="sec-h">🔬 중복 · 공백 분석</h3>
     ${dupHtml}${gapHtml}${ok}
-    <p class="disclaimer">※ 입력한 정보만으로 판단한 참고용 분석입니다. 보장 권유·해지 권유가 아니며, 가입·해지는 본인 상황과 약관을 따져 신중히 결정하세요.</p>
+    <p class="disclaimer">※ 입력한 정보만으로 판단한 참고용 분석입니다. 보장·해지 권유가 아니며, 가입·해지는 본인 상황과 약관을 따져 신중히 결정하세요.</p>
   </section>`;
 }
 function renderCoverage() {
@@ -580,9 +773,13 @@ function renderCoverage() {
     $app.innerHTML = emptyState('아직 보장 정보가 없어요', '"내 보험" 탭에서 보험과 보장을 추가하면 여기에 정리돼요.');
     return;
   }
-  const blocks = keys.map(k => {
+  // 카테고리 정액 합계의 최댓값(막대 그래프 기준)
+  const totals = keys.map(k => byCat[k].reduce((s, c) => s + (Number(c.amount) || 0), 0));
+  const maxTotal = Math.max(1, ...totals);
+  const blocks = keys.map((k, idx) => {
     const items = byCat[k];
-    const total = items.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    const total = totals[idx];
+    const pct = Math.round((total / maxTotal) * 100);
     const rows = items.map(c => `
       <li>
         <div class="cov-line">
@@ -596,6 +793,7 @@ function renderCoverage() {
         <h3>${CATEGORY_ICON[k]} ${CATEGORY_LABEL[k]}</h3>
         <span class="cov-block-total">정액 합계 ${won(total) || '-'}</span>
       </div>
+      ${total ? `<div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>` : ''}
       <ul class="cov-list">${rows}</ul>
     </section>`;
   }).join('');
@@ -614,8 +812,7 @@ function renderSituations() {
   $app.innerHTML = `
     <p class="lead">어떤 일이 생겼나요? 상황을 고르면 <b>내가 가진 보험 중 해당되는 보장</b>과 청구 방법을 알려드려요.</p>
     <div class="sit-grid">${cards}</div>`;
-  $app.querySelectorAll('.sit-card').forEach(b =>
-    b.addEventListener('click', () => openSituation(b.dataset.sit)));
+  $app.querySelectorAll('.sit-card').forEach(b => b.addEventListener('click', () => openSituation(b.dataset.sit)));
 }
 function matchPoliciesForSituation(sit) {
   const results = [];
@@ -636,7 +833,7 @@ function openSituation(id) {
   const matchHtml = results.length
     ? results.map(r => `
         <div class="match-card">
-          <div class="match-head">${esc(r.p.insurer)} · ${esc(r.p.product)}</div>
+          <div class="match-head">${esc(r.p.insurer)} · ${esc(r.p.product)}${r.p.insured ? ` <span class="muted">(${esc(r.p.insured)})</span>` : ''}</div>
           <ul>
             ${r.matched.map(c => `<li>
               <span>${CATEGORY_ICON[c.category] || '•'} ${esc(c.name)}</span>
@@ -656,12 +853,14 @@ function openSituation(id) {
     </div>
     <h3 class="sec-h">✅ 내 보험에서 받을 수 있는 보장</h3>
     ${matchHtml}
+    <button type="button" class="btn-primary wide" id="makeClaim">🧾 이 건으로 청구 체크리스트 만들기</button>
     <h3 class="sec-h">🧾 청구 준비 / 절차</h3>
     <ol class="steps">${sit.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
     <h3 class="sec-h">⚠️ 놓치기 쉬운 점</h3>
     <ul class="cautions">${sit.cautions.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
     <p class="disclaimer">※ 일반적인 안내입니다. 실제 지급 여부는 약관과 보험사 심사로 결정돼요.</p>
   `);
+  $modalRoot.querySelector('#makeClaim').addEventListener('click', () => createClaimFromSituation(sit));
 }
 
 /* === 4) 용어 사전 === */
@@ -688,6 +887,103 @@ function renderGlossary() {
   };
   draw();
   document.getElementById('glossarySearch').addEventListener('input', e => draw(e.target.value));
+}
+
+/* ---------- 보험금 청구 도우미 ---------- */
+function claimsSectionHtml() {
+  const active = state.claims.filter(c => c.status !== '지급 완료');
+  if (!active.length) return '';
+  return `<section class="claims-box">
+    <div class="alert-head">🧾 진행 중인 청구 <span>${active.length}건</span></div>
+    ${active.map(c => {
+      const done = c.steps.filter(s => s.done).length;
+      return `<button class="claim-row" data-claim="${c.id}">
+        <span class="claim-ico">${c.icon || '🧾'}</span>
+        <span class="claim-text"><b>${esc(c.title)}</b><span class="claim-prog">${esc(c.status)} · 준비 ${done}/${c.steps.length}</span></span>
+        <span class="sit-arrow">›</span>
+      </button>`;
+    }).join('')}
+  </section>`;
+}
+function bindClaimsSection() {
+  $app.querySelectorAll('[data-claim]').forEach(b => b.addEventListener('click', () => openClaim(b.dataset.claim)));
+}
+function createClaimFromSituation(sit) {
+  const claim = {
+    id: uid(), title: sit.title, icon: sit.icon, situationId: sit.id,
+    status: '준비 중',
+    steps: sit.steps.map(t => ({ text: t, done: false })),
+    memo: '', createdAt: new Date().toISOString().slice(0, 10),
+  };
+  state.claims.unshift(claim);
+  saveClaims();
+  openClaim(claim.id);
+}
+function openClaim(id) {
+  const c = state.claims.find(x => x.id === id);
+  if (!c) return;
+  const statusOpts = CLAIM_STATUSES.map(s => `<option ${c.status === s ? 'selected' : ''}>${s}</option>`).join('');
+  openModal(`
+    <div class="modal-head"><h2>${c.icon || '🧾'} ${esc(c.title)}</h2><button class="icon-btn" data-close>✕</button></div>
+    <div class="claim-meta">
+      <label class="claim-status">진행 상태
+        <select id="claimStatus">${statusOpts}</select>
+      </label>
+      <span class="muted">시작 ${esc(c.createdAt)}</span>
+    </div>
+    <h3 class="sec-h">준비물 / 절차 체크리스트</h3>
+    <ul class="checklist" id="checklist">
+      ${c.steps.map((s, i) => `
+        <li class="${s.done ? 'done' : ''}" data-i="${i}">
+          <button type="button" class="chk" data-i="${i}">${s.done ? '☑' : '☐'}</button>
+          <span>${esc(s.text)}</span>
+          <button type="button" class="step-del" data-i="${i}" title="삭제">✕</button>
+        </li>`).join('')}
+    </ul>
+    <div class="add-step">
+      <input id="newStep" placeholder="할 일 추가 (예: 진단서 발급)" />
+      <button type="button" class="btn-ghost" id="addStep">추가</button>
+    </div>
+    <label>메모 <textarea id="claimMemo" rows="2" placeholder="청구번호, 담당자, 통화 내용 등">${esc(c.memo)}</textarea></label>
+    <div class="modal-foot">
+      <button type="button" class="btn-ghost danger" id="claimDel">🗑️ 청구 삭제</button>
+      <button type="button" class="btn-primary" data-close id="claimDone">확인</button>
+    </div>
+  `);
+  const save = () => { saveClaims(); if (state.tab === 'policies') render(); };
+  $modalRoot.querySelector('#claimStatus').addEventListener('change', e => { c.status = e.target.value; save(); });
+  $modalRoot.querySelector('#claimMemo').addEventListener('input', e => { c.memo = e.target.value; saveClaims(); });
+  $modalRoot.querySelectorAll('.chk').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.i; c.steps[i].done = !c.steps[i].done; save(); openClaim(id);
+  }));
+  $modalRoot.querySelectorAll('.step-del').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.i; c.steps.splice(i, 1); save(); openClaim(id);
+  }));
+  $modalRoot.querySelector('#addStep').addEventListener('click', () => {
+    const v = $modalRoot.querySelector('#newStep').value.trim();
+    if (!v) return; c.steps.push({ text: v, done: false }); save(); openClaim(id);
+  });
+  $modalRoot.querySelector('#claimDel').addEventListener('click', () => {
+    if (!confirm('이 청구 기록을 삭제할까요?')) return;
+    state.claims = state.claims.filter(x => x.id !== id); save(); closeModal();
+  });
+}
+function openClaimsList() {
+  if (!state.claims.length) { alert('저장된 청구 기록이 없어요. "상황별" 탭에서 상황을 고른 뒤 "청구 체크리스트 만들기"로 시작할 수 있어요.'); return; }
+  openModal(`
+    <div class="modal-head"><h2>🧾 청구 내역</h2><button class="icon-btn" data-close>✕</button></div>
+    <div class="claims-list">
+      ${state.claims.map(c => {
+        const done = c.steps.filter(s => s.done).length;
+        return `<button class="claim-row" data-claim="${c.id}">
+          <span class="claim-ico">${c.icon || '🧾'}</span>
+          <span class="claim-text"><b>${esc(c.title)}</b><span class="claim-prog">${esc(c.status)} · 준비 ${done}/${c.steps.length} · ${esc(c.createdAt)}</span></span>
+          <span class="sit-arrow">›</span>
+        </button>`;
+      }).join('')}
+    </div>
+  `);
+  $modalRoot.querySelectorAll('[data-claim]').forEach(b => b.addEventListener('click', () => openClaim(b.dataset.claim)));
 }
 
 /* ---------- 모달 ---------- */
@@ -725,46 +1021,49 @@ async function enableNotifications() {
   if (!('Notification' in window)) { alert('이 브라우저는 알림을 지원하지 않아요.'); return; }
   const perm = await Notification.requestPermission();
   if (perm === 'granted') {
-    localStorage.removeItem('notifiedOn');
-    checkAndNotify(true);
+    localStorage.removeItem('notifiedOn'); checkAndNotify(true);
     alert('알림을 켰어요. 임박한 갱신·만기(7일 이내)가 있으면 앱을 열 때 알려드려요.');
   } else {
     alert('알림 권한이 꺼져 있어요. 폰 설정에서 이 앱(사이트)의 알림을 허용할 수 있어요.');
   }
 }
 
-/* ---------- 백업 / 가져오기 / 초기화 ---------- */
+/* ---------- 메뉴 / 백업 ---------- */
 function openMenu() {
   const notifState = ('Notification' in window)
     ? (Notification.permission === 'granted' ? '켜짐' : Notification.permission === 'denied' ? '차단됨' : '꺼짐')
     : '미지원';
   openModal(`
-    <div class="modal-head"><h2>백업 · 설정</h2><button class="icon-btn" data-close>✕</button></div>
+    <div class="modal-head"><h2>메뉴 · 설정</h2><button class="icon-btn" data-close>✕</button></div>
     <div class="menu-list">
+      <button class="menu-item" id="bulkBtn">📥 보험 목록 한번에 가져오기</button>
+      <button class="menu-item" id="claimsBtn">🧾 청구 내역 보기</button>
       <button class="menu-item" id="notifBtn">🔔 일정 알림 허용 <span class="menu-state">현재: ${notifState}</span></button>
-      <button class="menu-item" id="exportBtn">⬇️ 내 보험 데이터 내보내기 (백업)</button>
+      <button class="menu-item" id="exportBtn">⬇️ 데이터 내보내기 (백업)</button>
       <button class="menu-item" id="importBtn">⬆️ 백업 파일 불러오기</button>
       <button class="menu-item danger" id="resetBtn">🗑️ 전체 초기화</button>
     </div>
     <input type="file" id="importFile" accept="application/json" hidden />
-    <p class="hint">데이터는 이 기기(브라우저)에만 저장됩니다. 백업 파일에는 보험 정보가 담기며, 증권 사진은 용량이 커서 포함되지 않아요. 가끔 백업을 내보내 두세요.</p>
+    <p class="hint">데이터는 이 기기(브라우저)에만 저장됩니다. 백업에는 보험·청구 정보가 담기며, 증권 사진은 용량이 커서 포함되지 않아요.</p>
   `);
+  document.getElementById('bulkBtn').onclick = openBulkImport;
+  document.getElementById('claimsBtn').onclick = openClaimsList;
   document.getElementById('notifBtn').onclick = enableNotifications;
   document.getElementById('exportBtn').onclick = exportData;
   document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
   document.getElementById('importFile').onchange = importData;
   document.getElementById('resetBtn').onclick = () => {
-    if (confirm('모든 보험 데이터를 지울까요? 되돌릴 수 없어요.')) {
+    if (confirm('모든 보험·청구 데이터를 지울까요? 되돌릴 수 없어요.')) {
       state.policies.forEach(p => delPhoto(p.id));
-      state.policies = [];
-      savePolicies();
-      closeModal();
-      setTab('policies');
+      state.policies = []; state.claims = [];
+      savePolicies(); saveClaims();
+      closeModal(); setTab('policies');
     }
   };
 }
 function exportData() {
-  const blob = new Blob([JSON.stringify(state.policies, null, 2)], { type: 'application/json' });
+  const payload = { policies: state.policies, claims: state.claims, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `내보험_백업_${new Date().toISOString().slice(0, 10)}.json`;
@@ -778,12 +1077,13 @@ function importData(e) {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!Array.isArray(data)) throw new Error('형식 오류');
+      const policies = Array.isArray(data) ? data : data.policies;   // 구버전(배열) 호환
+      if (!Array.isArray(policies)) throw new Error('형식 오류');
       if (confirm('불러온 데이터로 교체할까요? (현재 데이터는 사라집니다)')) {
-        state.policies = data;
-        savePolicies();
-        closeModal();
-        setTab('policies');
+        state.policies = policies;
+        state.claims = Array.isArray(data.claims) ? data.claims : [];
+        savePolicies(); saveClaims();
+        closeModal(); setTab('policies');
       }
     } catch (err) {
       alert('백업 파일을 읽을 수 없어요. 올바른 JSON 파일인지 확인하세요.');
@@ -793,8 +1093,7 @@ function importData(e) {
 }
 
 /* ---------- 초기화 ---------- */
-document.querySelectorAll('.tab').forEach(b =>
-  b.addEventListener('click', () => setTab(b.dataset.tab)));
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 $fab.addEventListener('click', () => openPolicyForm());
 document.getElementById('menuBtn').addEventListener('click', openMenu);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
