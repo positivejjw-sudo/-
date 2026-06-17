@@ -435,7 +435,10 @@ async function openPolicyForm(id) {
           <button type="button" class="btn-ghost" id="addCov">＋ 보장</button>
         </div>
       </div>
-      <p class="hint">"🧩 템플릿"을 누르면 선택한 종류에 흔한 보장이 자동으로 채워져요. 금액만 증권 보고 채우면 됩니다.</p>
+      <button type="button" class="btn-primary wide" id="covOcrBtn">📋 보장내용 사진에서 자동 채우기</button>
+      <input type="file" id="covOcrInput" accept="image/*" capture="environment" hidden />
+      <div id="covOcrStatus" class="hint"></div>
+      <p class="hint">보험사 앱(또는 내보험찾아줌)의 <b>"보장내용 조회"</b> 화면을 캡처해 올리면, 보장 항목·금액을 자동으로 읽어 채워줘요. (직접 입력 안 해도 됨) · "🧩 템플릿"은 종류별 흔한 보장을 채웁니다.</p>
       <div id="covList">${(p.coverages || []).map(covRow).join('')}</div>
 
       <label>메모 <textarea name="memo" rows="2" placeholder="기억할 점 (예: 콜센터 1588-0000)">${esc(p.memo)}</textarea></label>
@@ -529,6 +532,41 @@ async function openPolicyForm(id) {
     bindCovDel();
     if (!added) alert('이미 템플릿 보장이 모두 들어 있어요.');
   });
+
+  /* 보장내용 사진 → 보장 자동 채우기 (OCR) */
+  const covOcrInput = $modalRoot.querySelector('#covOcrInput');
+  $modalRoot.querySelector('#covOcrBtn').addEventListener('click', () => covOcrInput.click());
+  covOcrInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const status = $modalRoot.querySelector('#covOcrStatus');
+    status.textContent = '보장내용 사진 인식 준비 중… (처음엔 시간이 걸려요)';
+    try {
+      const dataUrl = await fileToResizedDataUrl(file, 1600, 0.85);
+      const text = await runOcr(dataUrl, m => {
+        if (m && m.status === 'recognizing text') status.textContent = `인식 중… ${Math.round((m.progress || 0) * 100)}%`;
+      });
+      const rows = parseCoverageRows(text);
+      if (!rows.length) {
+        status.innerHTML = '보장 항목을 찾지 못했어요. 더 또렷한 "보장내용 조회" 화면을 찍거나 직접 추가하세요.'
+          + (text.trim() ? `<details class="ocr-text"><summary>인식된 글자 보기</summary><pre>${esc(text)}</pre></details>` : '');
+      } else {
+        const existing = new Set([...covList.querySelectorAll('.cov-name')].map(i => i.value.trim()).filter(Boolean));
+        let added = 0;
+        rows.forEach(r => {
+          if (existing.has(r.name)) return;
+          covList.insertAdjacentHTML('beforeend', covRow({ id: uid(), category: r.category, name: r.name, amount: r.amount || '', note: '' }));
+          added++;
+        });
+        bindCovDel();
+        status.innerHTML = `✅ ${added}개 보장을 자동으로 채웠어요. 항목·금액이 맞는지 확인하고 고치세요.`
+          + `<details class="ocr-text"><summary>인식된 글자 보기</summary><pre>${esc(text)}</pre></details>`;
+      }
+    } catch (err) {
+      status.innerHTML = '⚠️ 글자 인식 기능을 불러오지 못했어요(인터넷 연결이 필요합니다). 직접 추가해 주세요.';
+    }
+    covOcrInput.value = '';
+  };
   bindCovDel();
 
   /* 저장 */
@@ -602,6 +640,62 @@ function parseOcr(text) {
   const prod = lines.find(l => /보험/.test(l) && l.length <= 25 && !/회사|증권|약관|주식회사/.test(l));
   if (prod) out.product = prod;
   return out;
+}
+
+/* 보장내용 사진(표)에서 보장 항목·금액을 자동 추출 */
+function extractAmount(line) {
+  let m;
+  m = /(\d+)\s*억(?:\s*([\d,]+)\s*만)?/.exec(line);
+  if (m) { let v = parseInt(m[1]) * 1e8; if (m[2]) v += parseInt(m[2].replace(/,/g, '')) * 1e4; return { amount: v, str: m[0] }; }
+  m = /(\d+)\s*천만/.exec(line);
+  if (m) return { amount: parseInt(m[1]) * 1e7, str: m[0] };
+  m = /([\d,]+)\s*만/.exec(line);
+  if (m) { const n = parseInt(m[1].replace(/,/g, '')); if (n) return { amount: n * 1e4, str: m[0] }; }
+  m = /([\d,]{5,})\s*원/.exec(line);
+  if (m) { const n = parseInt(m[1].replace(/,/g, '')); if (!isNaN(n)) return { amount: n, str: m[0] }; }
+  return null;
+}
+function categoryFromName(n) {
+  const map = [
+    [/(실손|통원|외래|처방|의료비)/, 'actualloss'],
+    [/수술/, 'surgery'],
+    [/(입원|일당)/, 'hospital'],
+    [/(사망|유족)/, 'death'],
+    [/(후유장해|장해)/, 'disability'],
+    [/(골절|상해|깁스)/, 'injury'],
+    [/(운전|교통|벌금|변호사)/, 'driving'],
+    [/(화재|재물|누수|도난)/, 'fire'],
+    [/(배상|일상생활)/, 'liability'],
+    [/(치아|임플란트|보철|크라운|틀니)/, 'dental'],
+    [/(간병|요양|치매)/, 'care'],
+    [/(암|뇌|심장|뇌혈관|허혈|진단)/, 'diagnosis'],
+  ];
+  for (const [re, c] of map) if (re.test(n)) return c;
+  return 'etc';
+}
+function parseCoverageRows(text) {
+  const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+  const rows = [];
+  for (const line of lines) {
+    const amt = extractAmount(line);
+    let name = line;
+    if (amt) name = name.replace(amt.str, ' ');
+    name = name
+      .replace(/\d[\d,]*\s*(억|천만|천|백만|만)\s*원?/g, ' ')  // 남은 금액 표현
+      .replace(/[\d,]{3,}\s*원/g, ' ')                         // 12,345원
+      .replace(/\d+\s*일\s*당?/g, ' ')                         // 1일당, 120일
+      .replace(/\d+\s*(회|년|세|%)/g, ' ')                      // 5회, 100세
+      .replace(/(^|\s)원(?=\s|$)/g, ' ')                       // 홀로 남은 '원' (입원·통원은 보존)
+      .replace(/[()\[\]:|·•\-]/g, ' ')
+      .replace(/\s{2,}/g, ' ').trim();
+    if (name.length < 2 || !/[가-힣]/.test(name)) continue;
+    if (/^(보장내용|보장명|가입금액|보험가입금액|담보명?|구분|보험명|상품명|증권|계약|피보험자|보험기간|납입)/.test(name)) continue;
+    const hasKw = /(진단비|수술비|입원|일당|사망|장해|실손|의료비|통원|골절|치료비|벌금|배상|화재|간병|진단|수술|보장|특약|담보)/.test(name);
+    if (!amt && !hasKw) continue;
+    rows.push({ category: categoryFromName(name), name: name.slice(0, 40), amount: amt ? amt.amount : '' });
+  }
+  const seen = new Set();
+  return rows.filter(r => { if (seen.has(r.name)) return false; seen.add(r.name); return true; }).slice(0, 30);
 }
 
 /* ---------- 보험 목록 한번에 가져오기 (반자동 등록) ---------- */
