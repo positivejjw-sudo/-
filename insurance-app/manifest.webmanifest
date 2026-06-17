@@ -1,0 +1,16 @@
+{
+  "name": "내 보험 한눈에",
+  "short_name": "내 보험",
+  "description": "내가 가진 보험 회사·상품과 보장 범위를 한눈에. 상황별로 받을 수 있는 보험금을 알려주는 개인 보험 정리 앱.",
+  "lang": "ko",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#1f6feb",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
