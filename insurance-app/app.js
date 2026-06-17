@@ -387,9 +387,9 @@ async function openPolicyForm(id) {
     <form id="policyForm" class="form">
       <div class="photo-section">
         <div class="cov-head"><h3>📎 증권 사진</h3></div>
-        <p class="hint">증권/보장내용 화면을 찍어두면 확인이 편해요. 사진에서 글자를 읽어 자동 입력도 시도할 수 있어요.</p>
+        <p class="hint">증권/보장내용 화면을 <b>촬영하거나 갤러리의 캡처(스크린샷) 이미지를 선택</b>할 수 있어요. 사진에서 글자를 읽어 자동 입력도 시도합니다.</p>
         <div id="photoArea"></div>
-        <input type="file" id="photoInput" accept="image/*" capture="environment" hidden />
+        <input type="file" id="photoInput" accept="image/*" hidden />
       </div>
 
       <label>보험회사 <input name="insurer" list="insurerList" value="${esc(p.insurer)}" placeholder="입력하면 회사명이 자동 추천돼요" required /></label>
@@ -435,10 +435,10 @@ async function openPolicyForm(id) {
           <button type="button" class="btn-ghost" id="addCov">＋ 보장</button>
         </div>
       </div>
-      <button type="button" class="btn-primary wide" id="covOcrBtn">📋 보장내용 사진에서 자동 채우기</button>
-      <input type="file" id="covOcrInput" accept="image/*" capture="environment" hidden />
+      <button type="button" class="btn-primary wide" id="covOcrBtn">📋 보장내용 사진/캡처에서 자동 채우기</button>
+      <input type="file" id="covOcrInput" accept="image/*" hidden />
       <div id="covOcrStatus" class="hint"></div>
-      <p class="hint">보험사 앱(또는 내보험찾아줌)의 <b>"보장내용 조회"</b> 화면을 캡처해 올리면, 보장 항목·금액을 자동으로 읽어 채워줘요. (직접 입력 안 해도 됨) · "🧩 템플릿"은 종류별 흔한 보장을 채웁니다.</p>
+      <p class="hint">보험사 앱(또는 내보험찾아줌)의 <b>"보장내용 조회"</b> 화면을 <b>캡처해 두었다가 갤러리에서 선택</b>하거나 바로 촬영하면, 보장 항목·금액을 자동으로 읽어 채워줘요. (직접 입력 안 해도 됨) · "🧩 템플릿"은 종류별 흔한 보장을 채웁니다.</p>
       <div id="covList">${(p.coverages || []).map(covRow).join('')}</div>
 
       <label>메모 <textarea name="memo" rows="2" placeholder="기억할 점 (예: 콜센터 1588-0000)">${esc(p.memo)}</textarea></label>
