@@ -18,6 +18,15 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="tabGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#6d4afc" />
+        <stop offset="0.55" stop-color="#8b3bf0" />
+        <stop offset="1" stop-color="#b421d9" />
+      </linearGradient>
+    </defs>
+  </svg>
   <header class="app-header">
     <h1 id="screenTitle">내 보험 한눈에</h1>
     <button id="menuBtn" class="icon-btn" aria-label="백업/설정">⋯</button>
@@ -29,16 +38,37 @@
 
   <nav class="tabbar" aria-label="주요 메뉴">
     <button class="tab" data-tab="policies" aria-current="page">
-      <span class="tab-ico">📋</span><span>내 보험</span>
+      <span class="tab-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="4.5" width="14" height="16.5" rx="3" />
+          <path d="M9 4.2h6a1.1 1.1 0 0 1 1.1 1.1v.6A1.1 1.1 0 0 1 15 7H9a1.1 1.1 0 0 1-1.1-1.1v-.6A1.1 1.1 0 0 1 9 4.2Z" />
+          <path d="M9 11.5h6M9 15h4" />
+        </svg>
+      </span><span>내 보험</span>
     </button>
     <button class="tab" data-tab="coverage">
-      <span class="tab-ico">🛡️</span><span>보장보기</span>
+      <span class="tab-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3.2l6.8 2.6v4.9c0 4.4-2.9 7.4-6.8 8.7-3.9-1.3-6.8-4.3-6.8-8.7V5.8L12 3.2Z" />
+          <path d="M9.2 11.7l2 2 3.6-4.1" />
+        </svg>
+      </span><span>보장보기</span>
     </button>
     <button class="tab" data-tab="situations">
-      <span class="tab-ico">🔎</span><span>상황별</span>
+      <span class="tab-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="6.4" />
+          <path d="M15.7 15.7l4.3 4.3" />
+        </svg>
+      </span><span>상황별</span>
     </button>
     <button class="tab" data-tab="glossary">
-      <span class="tab-ico">📖</span><span>용어사전</span>
+      <span class="tab-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 6.6C10.4 5.4 8.2 4.9 5.5 5.2v12.4c2.7-.3 4.9.2 6.5 1.4 1.6-1.2 3.8-1.7 6.5-1.4V5.2C15.8 4.9 13.6 5.4 12 6.6Z" />
+          <path d="M12 6.6v12.4" />
+        </svg>
+      </span><span>용어사전</span>
     </button>
   </nav>
 
