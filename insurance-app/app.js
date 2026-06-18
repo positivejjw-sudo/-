@@ -435,10 +435,10 @@ async function openPolicyForm(id) {
           <button type="button" class="btn-ghost" id="addCov">＋ 보장</button>
         </div>
       </div>
-      <button type="button" class="btn-primary wide" id="covOcrBtn">📋 보장내용 사진/캡처에서 자동 채우기</button>
-      <input type="file" id="covOcrInput" accept="image/*" hidden />
+      <button type="button" class="btn-primary wide" id="covOcrBtn">📋 보장내용 사진·캡처·PDF에서 자동 채우기</button>
+      <input type="file" id="covOcrInput" accept="image/*,application/pdf,.pdf" hidden />
       <div id="covOcrStatus" class="hint"></div>
-      <p class="hint">보험사 앱(또는 내보험찾아줌)의 <b>"보장내용 조회"</b> 화면을 <b>캡처해 두었다가 갤러리에서 선택</b>하거나 바로 촬영하면, 보장 항목·금액을 자동으로 읽어 채워줘요. (직접 입력 안 해도 됨) · "🧩 템플릿"은 종류별 흔한 보장을 채웁니다.</p>
+      <p class="hint">보험사 앱/홈페이지의 <b>"보장내용 조회"</b> 화면을 <b>캡처(갤러리)</b> 하거나, <b>보장내용 PDF 파일</b>을 올리면 보장 항목·금액을 자동으로 읽어 채워줘요. (PDF는 글자가 있으면 더 정확하게 인식) · "🧩 템플릿"은 종류별 흔한 보장을 채웁니다.</p>
       <div id="covList">${(p.coverages || []).map(covRow).join('')}</div>
 
       <label>메모 <textarea name="memo" rows="2" placeholder="기억할 점 (예: 콜센터 1588-0000)">${esc(p.memo)}</textarea></label>
@@ -540,15 +540,21 @@ async function openPolicyForm(id) {
     const file = e.target.files[0];
     if (!file) return;
     const status = $modalRoot.querySelector('#covOcrStatus');
-    status.textContent = '보장내용 사진 인식 준비 중… (처음엔 시간이 걸려요)';
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    status.textContent = isPdf ? 'PDF 분석 준비 중…' : '보장내용 사진 인식 준비 중… (처음엔 시간이 걸려요)';
     try {
-      const dataUrl = await fileToResizedDataUrl(file, 1600, 0.85);
-      const text = await runOcr(dataUrl, m => {
-        if (m && m.status === 'recognizing text') status.textContent = `인식 중… ${Math.round((m.progress || 0) * 100)}%`;
-      });
+      let text;
+      if (isPdf) {
+        text = await extractTextFromPdf(file, msg => { status.textContent = msg; });
+      } else {
+        const dataUrl = await fileToResizedDataUrl(file, 1600, 0.85);
+        text = await runOcr(dataUrl, m => {
+          if (m && m.status === 'recognizing text') status.textContent = `인식 중… ${Math.round((m.progress || 0) * 100)}%`;
+        });
+      }
       const rows = parseCoverageRows(text);
       if (!rows.length) {
-        status.innerHTML = '보장 항목을 찾지 못했어요. 더 또렷한 "보장내용 조회" 화면을 찍거나 직접 추가하세요.'
+        status.innerHTML = `보장 항목을 찾지 못했어요. ${isPdf ? '다른 PDF(보장내용)이거나 표가 복잡할 수 있어요.' : '더 또렷한 "보장내용 조회" 화면을 찍어보세요.'} 직접 추가도 가능합니다.`
           + (text.trim() ? `<details class="ocr-text"><summary>인식된 글자 보기</summary><pre>${esc(text)}</pre></details>` : '');
       } else {
         const existing = new Set([...covList.querySelectorAll('.cov-name')].map(i => i.value.trim()).filter(Boolean));
@@ -563,7 +569,7 @@ async function openPolicyForm(id) {
           + `<details class="ocr-text"><summary>인식된 글자 보기</summary><pre>${esc(text)}</pre></details>`;
       }
     } catch (err) {
-      status.innerHTML = '⚠️ 글자 인식 기능을 불러오지 못했어요(인터넷 연결이 필요합니다). 직접 추가해 주세요.';
+      status.innerHTML = '⚠️ 파일을 인식하지 못했어요(인터넷 연결이 필요하며, 암호가 걸린 PDF는 풀고 올려야 해요). 직접 추가해 주세요.';
     }
     covOcrInput.value = '';
   };
@@ -630,6 +636,71 @@ async function runOcr(dataUrl, onProgress) {
   const T = await loadTesseract();
   const { data } = await T.recognize(dataUrl, 'kor+eng', { logger: onProgress });
   return data.text || '';
+}
+
+/* ---------- PDF에서 글자 추출 (PDF.js, 필요 시 OCR 폴백) ---------- */
+const PDFJS_VER = '3.11.174';
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VER}/build/pdf.min.js`;
+    s.onload = () => {
+      try {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VER}/build/pdf.worker.min.js`;
+        res(window.pdfjsLib);
+      } catch (e) { rej(e); }
+    };
+    s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+/* PDF.js 텍스트 아이템을 좌표 기준으로 줄 단위 복원 (표 구조 보존) */
+function itemsToLines(items) {
+  const rows = [];
+  items.forEach(it => {
+    if (!it.str || !it.str.trim()) return;
+    const y = Math.round(it.transform[5]);
+    let row = rows.find(r => Math.abs(r.y - y) <= 3);
+    if (!row) { row = { y, parts: [] }; rows.push(row); }
+    row.parts.push({ x: it.transform[4], s: it.str });
+  });
+  rows.sort((a, b) => b.y - a.y);
+  return rows.map(r => r.parts.sort((a, b) => a.x - b.x).map(p => p.s).join(' ').replace(/\s{2,}/g, ' ').trim())
+             .filter(Boolean).join('\n');
+}
+async function extractTextFromPdf(file, onProgress) {
+  const pdfjsLib = await loadPdfJs();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const maxPages = Math.min(pdf.numPages, 15);
+  let text = '';
+  for (let i = 1; i <= maxPages; i++) {
+    onProgress && onProgress(`PDF 글자 추출 ${i}/${maxPages}…`);
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    text += '\n' + itemsToLines(tc.items);
+  }
+  // 글자가 거의 없으면 스캔(이미지) PDF → 페이지를 렌더해 OCR
+  const hangul = (text.match(/[가-힣]/g) || []).length;
+  if (hangul < 20) {
+    text = '';
+    const ocrPages = Math.min(pdf.numPages, 8);
+    for (let i = 1; i <= ocrPages; i++) {
+      onProgress && onProgress(`스캔 PDF 이미지 인식 ${i}/${ocrPages}…`);
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      const t = await runOcr(dataUrl, m => {
+        if (m && m.status === 'recognizing text') onProgress && onProgress(`스캔 PDF 인식 ${i}/${ocrPages} · ${Math.round((m.progress || 0) * 100)}%`);
+      });
+      text += '\n' + t;
+    }
+  }
+  return text;
 }
 function parseOcr(text) {
   const out = {};
