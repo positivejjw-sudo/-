@@ -31,6 +31,19 @@ function profileAge() {
   return (a > 0 && a < 120) ? a : null;
 }
 function ageBand(a) { return a < 30 ? '20대' : a < 40 ? '30대' : a < 50 ? '40대' : a < 60 ? '50대' : '60대이상'; }
+/* 프로필(나이·결혼·자녀)을 반영한 권장 보장액 계산 */
+function computeBenchmark(band) {
+  const p = state.profile || {};
+  const married = !!p.married;
+  const children = Math.max(0, parseInt(p.children, 10) || 0);
+  const af = AGE_FACTOR;
+  const deathRaw = (BENCH_DEATH.self + (married ? BENCH_DEATH.spouse : 0) + children * BENCH_DEATH.perChild) * af.death[band];
+  return {
+    death: Math.min(BENCH_DEATH.cap, Math.round(deathRaw)),
+    diagnosis: Math.round(BENCH_BASE.diagnosis * af.diagnosis[band]),
+    disability: Math.round(BENCH_BASE.disability * af.disability[band]),
+  };
+}
 function coverageByCategory() {
   const sum = {}, exist = new Set();
   state.policies.forEach(p => (p.coverages || []).forEach(c => {
@@ -967,10 +980,13 @@ function renderAgeBenchmark() {
     </section>`;
   }
   const band = ageBand(age);
-  const bm = AGE_BENCHMARKS[band];
+  const bm = computeBenchmark(band);
   const { sum, exist } = coverageByCategory();
+  const p = state.profile || {};
+  const married = !!p.married, children = Math.max(0, parseInt(p.children, 10) || 0);
+  const genderNote = p.gender && GENDER_NOTES[p.gender] ? GENDER_NOTES[p.gender] : '';
 
-  const amtRows = Object.keys(bm).map(cat => {
+  const amtRows = ['death', 'diagnosis', 'disability'].map(cat => {
     const have = sum[cat] || 0, rec = bm[cat], ratio = rec ? have / rec : 0;
     const st = have === 0 ? ['❗', '없음', 'due-red']
       : ratio >= 1 ? ['✅', '충분', 'due-soft']
@@ -992,21 +1008,52 @@ function renderAgeBenchmark() {
     </div>`;
   }).join('');
 
+  const cond = `만 ${age}세 · ${esc(band)} · ${p.gender === 'M' ? '남' : p.gender === 'F' ? '여' : '성별-'} · ${married ? '기혼' : '미혼'} · 자녀 ${children}명`;
+
   return `<section class="bench">
-    <h3 class="sec-h">🎯 ${esc(band)} 권장 대비 내 보장 <button class="bench-edit" id="setAgeBtn">(만 ${age}세 · 변경)</button></h3>
+    <h3 class="sec-h">🎯 내 조건 맞춤 권장 대비 보장 <button class="bench-edit" id="setAgeBtn">(${cond} · 변경)</button></h3>
     ${amtRows}
+    ${genderNote ? `<div class="bench-note">💡 ${esc(genderNote)}</div>` : ''}
     <div class="bench-pres-h">아래는 "있으면 좋은" 기본 보장</div>
     ${presRows}
-    <p class="disclaimer">※ 통계 평균이 아니라 <b>일반적으로 권장되는 수준의 참고 가이드</b>입니다. 소득·가족구성·자산에 따라 적정 보장은 크게 다르며, 보장·해지 권유나 재무 조언이 아닙니다.</p>
+    <details class="ocr-text"><summary>권장 기준의 근거·출처</summary>
+      <div class="bench-src">
+        <p><b>사망보장</b> = 본인 정리자금 3천만 + 배우자(기혼) 1억 + 자녀 1인당 5천만 (× 연령 계수). 가장 부재 시 가족 자립에 약 3년·2억원 수준 필요(통계청 가계동향조사 기반, 업계 통용)에 근거.</p>
+        <p><b>중대질병 진단비</b> 기본 5천만(× 연령 계수): 연소득의 1.2~2배 권장(보험업계), 설계사 평균 3천만~5천만원.</p>
+        <p><b>상해 후유장해</b> 기본 1억(× 연령 계수).</p>
+        <p>출처: 생명보험협회 생명보험성향조사·통계(klia.or.kr), 보험연구원(kiri.or.kr), 언론 보도 등 공개자료 참고. 성별·가족구성 조합별 공식 평균표는 공개돼 있지 않아, 공개 통계로 기본액을 잡고 가족구성은 필요보장 산정원리로 조정한 <b>추정 모델</b>입니다.</p>
+      </div>
+    </details>
+    <p class="disclaimer">※ 통계 평균 자체가 아니라 <b>공개자료 기반 추정 참고치</b>입니다. 소득·자산·건강에 따라 적정 보장은 크게 다르며, 보장·해지 권유나 재무 조언이 아닙니다.</p>
   </section>`;
 }
 function openProfileForm() {
-  const cur = (state.profile && state.profile.birthYear) || '';
+  const p = state.profile || {};
+  const cur = p.birthYear || '';
+  const children = (p.children !== undefined && p.children !== null) ? p.children : '';
   openModal(`
-    <div class="modal-head"><h2>👤 내 정보</h2><button class="icon-btn" data-close>✕</button></div>
-    <p class="hint">출생연도를 입력하면 "보장보기"에서 또래 권장 보장과 비교해 드려요. (이 기기에만 저장됩니다)</p>
+    <div class="modal-head"><h2>👤 내 정보 (맞춤 비교용)</h2><button class="icon-btn" data-close>✕</button></div>
+    <p class="hint">아래 정보로 "보장보기"에서 내 조건에 맞춘 권장 보장과 비교해 드려요. (이 기기에만 저장)</p>
     <form id="profileForm" class="form">
-      <label>출생연도 <input name="birthYear" type="number" inputmode="numeric" value="${esc(cur)}" placeholder="예: 1985" required /></label>
+      <div class="grid2">
+        <label>출생연도 <input name="birthYear" type="number" inputmode="numeric" value="${esc(cur)}" placeholder="예: 1985" required /></label>
+        <label>성별
+          <select name="gender">
+            <option value="" ${!p.gender ? 'selected' : ''}>선택 안 함</option>
+            <option value="M" ${p.gender === 'M' ? 'selected' : ''}>남성</option>
+            <option value="F" ${p.gender === 'F' ? 'selected' : ''}>여성</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid2">
+        <label>결혼 여부
+          <select name="married">
+            <option value="" ${!p.married ? 'selected' : ''}>미혼</option>
+            <option value="1" ${p.married ? 'selected' : ''}>기혼</option>
+          </select>
+        </label>
+        <label>자녀 수 <input name="children" type="number" inputmode="numeric" min="0" value="${esc(children)}" placeholder="예: 2" /></label>
+      </div>
       <div class="modal-foot">
         <button type="button" class="btn-ghost" data-close>취소</button>
         <button type="submit" class="btn-primary">저장</button>
@@ -1015,10 +1062,16 @@ function openProfileForm() {
   `);
   $modalRoot.querySelector('#profileForm').addEventListener('submit', e => {
     e.preventDefault();
-    const by = parseInt(e.target.birthYear.value, 10);
+    const f = e.target;
+    const by = parseInt(f.birthYear.value, 10);
     const thisYear = new Date().getFullYear();
     if (!by || by < 1900 || by > thisYear) { alert('출생연도를 올바르게 입력해 주세요. (예: 1985)'); return; }
-    state.profile.birthYear = by;
+    state.profile = {
+      birthYear: by,
+      gender: f.gender.value,
+      married: f.married.value === '1',
+      children: Math.max(0, parseInt(f.children.value, 10) || 0),
+    };
     saveProfile();
     closeModal();
     setTab('coverage');
