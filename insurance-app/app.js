@@ -12,13 +12,33 @@ const $title = document.getElementById('screenTitle');
 const $modalRoot = document.getElementById('modalRoot');
 const $fab = document.getElementById('fab');
 
+const PROFILE_KEY = 'myInsurance.profile.v1';
 let state = {
   tab: 'policies',
   policies: loadPolicies(),
   claims: loadClaims(),
+  profile: loadProfile(),
   filterInsured: '전체',
   sort: 'default',
 };
+
+function loadProfile() { try { return JSON.parse(localStorage.getItem(PROFILE_KEY)) || {}; } catch (e) { return {}; } }
+function saveProfile() { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(state.profile)); } catch (e) {} }
+function profileAge() {
+  const by = state.profile && state.profile.birthYear;
+  if (!by) return null;
+  const a = new Date().getFullYear() - by;
+  return (a > 0 && a < 120) ? a : null;
+}
+function ageBand(a) { return a < 30 ? '20대' : a < 40 ? '30대' : a < 50 ? '40대' : a < 60 ? '50대' : '60대이상'; }
+function coverageByCategory() {
+  const sum = {}, exist = new Set();
+  state.policies.forEach(p => (p.coverages || []).forEach(c => {
+    exist.add(c.category);
+    sum[c.category] = (sum[c.category] || 0) + (Number(c.amount) || 0);
+  }));
+  return { sum, exist };
+}
 
 const CLAIM_STATUSES = ['준비 중', '접수함', '심사 중', '지급 완료'];
 
@@ -933,6 +953,78 @@ function renderAnalysis() {
     <p class="disclaimer">※ 입력한 정보만으로 판단한 참고용 분석입니다. 보장·해지 권유가 아니며, 가입·해지는 본인 상황과 약관을 따져 신중히 결정하세요.</p>
   </section>`;
 }
+/* 🎯 나이대 대비 보장 수준 (참고 가이드) */
+function renderAgeBenchmark() {
+  const age = profileAge();
+  if (!age) {
+    return `<section class="bench">
+      <h3 class="sec-h">🎯 나이대 대비 보장 수준</h3>
+      <div class="ana-card gap">
+        <div class="ana-title">나이를 알려주시면 또래 권장 보장과 비교해 드려요</div>
+        <div class="ana-sub">출생연도만 한 번 입력하면 됩니다. (기기에만 저장)</div>
+        <button class="btn-ghost" id="setAgeBtn" style="margin-top:10px">👤 나이 설정</button>
+      </div>
+    </section>`;
+  }
+  const band = ageBand(age);
+  const bm = AGE_BENCHMARKS[band];
+  const { sum, exist } = coverageByCategory();
+
+  const amtRows = Object.keys(bm).map(cat => {
+    const have = sum[cat] || 0, rec = bm[cat], ratio = rec ? have / rec : 0;
+    const st = have === 0 ? ['❗', '없음', 'due-red']
+      : ratio >= 1 ? ['✅', '충분', 'due-soft']
+      : ratio >= 0.5 ? ['⚠️', '다소 부족', 'due-orange']
+      : ['❗', '부족', 'due-red'];
+    const pct = Math.min(100, Math.round(ratio * 100));
+    return `<div class="bench-row">
+      <div class="bench-top"><span>${BENCHMARK_INFO[cat].label}</span><span class="bench-st ${st[2]}">${st[0]} ${st[1]}</span></div>
+      <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <div class="bench-sub">내 보장 ${won(have) || '0원'} · 권장 ${won(rec)} (${Math.round(ratio * 100)}%)</div>
+    </div>`;
+  }).join('');
+
+  const presRows = BENCHMARK_PRESENCE.map(cat => {
+    const has = exist.has(cat);
+    return `<div class="bench-row">
+      <div class="bench-top"><span>${BENCHMARK_INFO[cat].label}</span><span class="bench-st ${has ? 'due-soft' : 'due-red'}">${has ? '✅ 보유' : '❗ 미보유'}</span></div>
+      <div class="bench-sub">${BENCHMARK_INFO[cat].why}</div>
+    </div>`;
+  }).join('');
+
+  return `<section class="bench">
+    <h3 class="sec-h">🎯 ${esc(band)} 권장 대비 내 보장 <button class="bench-edit" id="setAgeBtn">(만 ${age}세 · 변경)</button></h3>
+    ${amtRows}
+    <div class="bench-pres-h">아래는 "있으면 좋은" 기본 보장</div>
+    ${presRows}
+    <p class="disclaimer">※ 통계 평균이 아니라 <b>일반적으로 권장되는 수준의 참고 가이드</b>입니다. 소득·가족구성·자산에 따라 적정 보장은 크게 다르며, 보장·해지 권유나 재무 조언이 아닙니다.</p>
+  </section>`;
+}
+function openProfileForm() {
+  const cur = (state.profile && state.profile.birthYear) || '';
+  openModal(`
+    <div class="modal-head"><h2>👤 내 정보</h2><button class="icon-btn" data-close>✕</button></div>
+    <p class="hint">출생연도를 입력하면 "보장보기"에서 또래 권장 보장과 비교해 드려요. (이 기기에만 저장됩니다)</p>
+    <form id="profileForm" class="form">
+      <label>출생연도 <input name="birthYear" type="number" inputmode="numeric" value="${esc(cur)}" placeholder="예: 1985" required /></label>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost" data-close>취소</button>
+        <button type="submit" class="btn-primary">저장</button>
+      </div>
+    </form>
+  `);
+  $modalRoot.querySelector('#profileForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const by = parseInt(e.target.birthYear.value, 10);
+    const thisYear = new Date().getFullYear();
+    if (!by || by < 1900 || by > thisYear) { alert('출생연도를 올바르게 입력해 주세요. (예: 1985)'); return; }
+    state.profile.birthYear = by;
+    saveProfile();
+    closeModal();
+    setTab('coverage');
+  });
+}
+
 function renderCoverage() {
   const byCat = {};
   state.policies.forEach(p => (p.coverages || []).forEach(c => {
@@ -940,7 +1032,8 @@ function renderCoverage() {
   }));
   const keys = CATEGORIES.map(c => c.key).filter(k => byCat[k]?.length);
   if (!keys.length) {
-    $app.innerHTML = emptyState('아직 보장 정보가 없어요', '"내 보험" 탭에서 보험과 보장을 추가하면 여기에 정리돼요.');
+    $app.innerHTML = renderAgeBenchmark() + emptyState('아직 보장 정보가 없어요', '"내 보험" 탭에서 보험과 보장을 추가하면 여기에 정리돼요.');
+    $app.querySelector('#setAgeBtn')?.addEventListener('click', openProfileForm);
     return;
   }
   // 카테고리 정액 합계의 최댓값(막대 그래프 기준)
@@ -967,8 +1060,9 @@ function renderCoverage() {
       <ul class="cov-list">${rows}</ul>
     </section>`;
   }).join('');
-  $app.innerHTML = renderAnalysis() + `<h3 class="sec-h">🛡️ 카테고리별 보장</h3>` + blocks +
+  $app.innerHTML = renderAgeBenchmark() + renderAnalysis() + `<h3 class="sec-h">🛡️ 카테고리별 보장</h3>` + blocks +
     `<p class="disclaimer">※ "정액 합계"는 진단비·일당처럼 금액이 정해진 보장의 단순 합계입니다. 실손은 실제 비용 기준이라 합산 의미가 다를 수 있어요.</p>`;
+  $app.querySelector('#setAgeBtn')?.addEventListener('click', openProfileForm);
 }
 
 /* === 3) 상황별 보장 찾기 === */
@@ -1208,6 +1302,7 @@ function openMenu() {
     <div class="menu-list">
       <button class="menu-item" id="bulkBtn">📥 보험 목록 한번에 가져오기</button>
       <button class="menu-item" id="claimsBtn">🧾 청구 내역 보기</button>
+      <button class="menu-item" id="profileBtn">👤 내 정보 (나이대 비교)</button>
       <button class="menu-item" id="notifBtn">🔔 일정 알림 허용 <span class="menu-state">현재: ${notifState}</span></button>
       <button class="menu-item" id="exportBtn">⬇️ 데이터 내보내기 (백업)</button>
       <button class="menu-item" id="importBtn">⬆️ 백업 파일 불러오기</button>
@@ -1218,6 +1313,7 @@ function openMenu() {
   `);
   document.getElementById('bulkBtn').onclick = openBulkImport;
   document.getElementById('claimsBtn').onclick = openClaimsList;
+  document.getElementById('profileBtn').onclick = openProfileForm;
   document.getElementById('notifBtn').onclick = enableNotifications;
   document.getElementById('exportBtn').onclick = exportData;
   document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
