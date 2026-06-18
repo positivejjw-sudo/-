@@ -7,6 +7,13 @@
 
 const STORE_KEY = 'myInsurance.policies.v1';
 const CLAIMS_KEY = 'myInsurance.claims.v1';
+
+/* ---------- 햅틱(진동) 피드백 ---------- */
+/* navigator.vibrate: 안드로이드 크롬 등에서 작동(iOS 사파리 미지원 → 자동 무시) */
+function haptic(pattern) {
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+}
+const HAPTIC = { tap: 10, tab: 14, press: 18, toggle: 8, success: [0, 22, 28, 22], warn: 30 };
 const $app = document.getElementById('app');
 const $title = document.getElementById('screenTitle');
 const $modalRoot = document.getElementById('modalRoot');
@@ -635,6 +642,7 @@ async function openPolicyForm(id) {
     if (editing) { const i = state.policies.findIndex(x => x.id === p.id); state.policies[i] = updated; }
     else state.policies.push(updated);
     savePolicies();
+    haptic(HAPTIC.success);
     closeModal();
     setTab('policies');
   });
@@ -1073,6 +1081,7 @@ function openProfileForm() {
       children: Math.max(0, parseInt(f.children.value, 10) || 0),
     };
     saveProfile();
+    haptic(HAPTIC.success);
     closeModal();
     setTab('coverage');
   });
@@ -1416,6 +1425,15 @@ document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () =>
 $fab.addEventListener('click', () => openPolicyForm());
 document.getElementById('menuBtn').addEventListener('click', openMenu);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+/* 누르는 거의 모든 인터랙션에 가벼운 햅틱 (캡처 단계라 핸들러가 막아도 동작) */
+const HAPTIC_SEL = 'button, .tab, .sit-card, .claim-row, .menu-item, .fchip, .term summary, .summary-btn, .card';
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest(HAPTIC_SEL);
+  if (!el) return;
+  if (el.classList.contains('btn-primary') || el.classList.contains('fab')) haptic(HAPTIC.press);
+  else haptic(HAPTIC.tap);
+}, true);
 
 setTab('policies');
 checkAndNotify(false);
