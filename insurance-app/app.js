@@ -561,7 +561,7 @@ async function openPolicyForm(id) {
         let added = 0;
         rows.forEach(r => {
           if (existing.has(r.name)) return;
-          covList.insertAdjacentHTML('beforeend', covRow({ id: uid(), category: r.category, name: r.name, amount: r.amount || '', note: '' }));
+          covList.insertAdjacentHTML('beforeend', covRow({ id: uid(), category: r.category, name: r.name, amount: r.amount || '', note: r.note || '' }));
           added++;
         });
         bindCovDel();
@@ -717,13 +717,15 @@ function parseOcr(text) {
 function extractAmount(line) {
   let m;
   m = /(\d+)\s*억(?:\s*([\d,]+)\s*만)?/.exec(line);
-  if (m) { let v = parseInt(m[1]) * 1e8; if (m[2]) v += parseInt(m[2].replace(/,/g, '')) * 1e4; return { amount: v, str: m[0] }; }
+  if (m) { let v = parseInt(m[1]) * 1e8; if (m[2]) v += parseInt(m[2].replace(/,/g, '')) * 1e4; return { amount: v, str: m[0], index: m.index }; }
   m = /(\d+)\s*천만/.exec(line);
-  if (m) return { amount: parseInt(m[1]) * 1e7, str: m[0] };
+  if (m) return { amount: parseInt(m[1]) * 1e7, str: m[0], index: m.index };
+  m = /(\d+)\s*백만/.exec(line);
+  if (m) return { amount: parseInt(m[1]) * 1e6, str: m[0], index: m.index };
   m = /([\d,]+)\s*만/.exec(line);
-  if (m) { const n = parseInt(m[1].replace(/,/g, '')); if (n) return { amount: n * 1e4, str: m[0] }; }
-  m = /([\d,]{5,})\s*원/.exec(line);
-  if (m) { const n = parseInt(m[1].replace(/,/g, '')); if (!isNaN(n)) return { amount: n, str: m[0] }; }
+  if (m) { const n = parseInt(m[1].replace(/,/g, '')); if (n) return { amount: n * 1e4, str: m[0], index: m.index }; }
+  m = /([\d,]{4,})\s*원/.exec(line);
+  if (m) { const n = parseInt(m[1].replace(/,/g, '')); if (n >= 10000) return { amount: n, str: m[0], index: m.index }; }
   return null;
 }
 function categoryFromName(n) {
@@ -733,7 +735,7 @@ function categoryFromName(n) {
     [/(입원|일당)/, 'hospital'],
     [/(사망|유족)/, 'death'],
     [/(후유장해|장해)/, 'disability'],
-    [/(골절|상해|깁스)/, 'injury'],
+    [/(골절|상해|깁스|화상)/, 'injury'],
     [/(운전|교통|벌금|변호사)/, 'driving'],
     [/(화재|재물|누수|도난)/, 'fire'],
     [/(배상|일상생활)/, 'liability'],
@@ -744,29 +746,32 @@ function categoryFromName(n) {
   for (const [re, c] of map) if (re.test(n)) return c;
   return 'etc';
 }
+/* 보장 줄이 아닌 것(보험료·계약정보·설명 조각)을 걸러내는 키워드 — 보장명에만 적용 */
+const COV_SKIP = /(보험료|적립|합계|납입|수금|환급|수익자|주민|계약자|계약번호|보험기간|주소|직업|단체|콜센터|홈페이지|대리점|지점|발행|보험증권|증권|약관|공시이율|책임준비금|상품설명서|담보명|페이지|기본사항|서열|전체피보험자|발급|제출|가입금액|한도|공제|평균|차감|본인부담|해당액|실손보상|지급률|초과|차액)/;
+/*
+ * 보장내용 표(사진 OCR/PDF 텍스트)에서 보장 행을 추출.
+ *  - 한 줄에 "보장명 + 가입금액 + (납기·만기) + 보장내용" 형태를 가정
+ *  - 보장명 = 금액 앞부분, 분류는 보장명+설명을 함께 보고 판단
+ */
 function parseCoverageRows(text) {
   const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
   const rows = [];
-  for (const line of lines) {
-    const amt = extractAmount(line);
-    let name = line;
-    if (amt) name = name.replace(amt.str, ' ');
-    name = name
-      .replace(/\d[\d,]*\s*(억|천만|천|백만|만)\s*원?/g, ' ')  // 남은 금액 표현
-      .replace(/[\d,]{3,}\s*원/g, ' ')                         // 12,345원
-      .replace(/\d+\s*일\s*당?/g, ' ')                         // 1일당, 120일
-      .replace(/\d+\s*(회|년|세|%)/g, ' ')                      // 5회, 100세
-      .replace(/(^|\s)원(?=\s|$)/g, ' ')                       // 홀로 남은 '원' (입원·통원은 보존)
-      .replace(/[()\[\]:|·•\-]/g, ' ')
-      .replace(/\s{2,}/g, ' ').trim();
-    if (name.length < 2 || !/[가-힣]/.test(name)) continue;
-    if (/^(보장내용|보장명|가입금액|보험가입금액|담보명?|구분|보험명|상품명|증권|계약|피보험자|보험기간|납입)/.test(name)) continue;
-    const hasKw = /(진단비|수술비|입원|일당|사망|장해|실손|의료비|통원|골절|치료비|벌금|배상|화재|간병|진단|수술|보장|특약|담보)/.test(name);
-    if (!amt && !hasKw) continue;
-    rows.push({ category: categoryFromName(name), name: name.slice(0, 40), amount: amt ? amt.amount : '' });
+  for (const raw of lines) {
+    const amt = extractAmount(raw);
+    if (!amt) continue;                       // 가입금액 없는 줄(설명/잘린행)은 제외
+    let name = raw.slice(0, amt.index);
+    const rest = raw.slice(amt.index + amt.str.length);
+    name = name.replace(/^\d+\s+/, '').replace(/^[\s.\-·•|×]+/, '')
+               .replace(/\s*\d+\s*(일당|일|회|년|세)\s*$/, '')
+               .replace(/[\s|]+$/, '').replace(/\s{2,}/g, ' ').trim();
+    const nk = name.replace(/\s/g, '');
+    if (nk.length < 2 || nk.length > 24 || !/[가-힣]/.test(nk)) continue;
+    if (COV_SKIP.test(nk)) continue;
+    const note = rest.replace(/^[\s원:]+/, '').replace(/\s{2,}/g, ' ').trim();
+    rows.push({ category: categoryFromName(nk + ' ' + note), name: name.slice(0, 40), amount: amt.amount, note: note.slice(0, 50) });
   }
   const seen = new Set();
-  return rows.filter(r => { if (seen.has(r.name)) return false; seen.add(r.name); return true; }).slice(0, 30);
+  return rows.filter(r => { const k = r.name.replace(/\s/g, '') + '|' + r.amount; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 60);
 }
 
 /* ---------- 보험 목록 한번에 가져오기 (반자동 등록) ---------- */
