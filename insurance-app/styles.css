@@ -106,10 +106,12 @@ main {
   color: var(--muted); font-size: 11px; font-weight: 700; border-radius: 16px;
   transition: color .2s, background .25s, transform .15s;
 }
-.tab .tab-ico { font-size: 21px; line-height: 1; transition: transform .25s; filter: grayscale(.3) opacity(.85); }
+.tab .tab-ico { display: flex; align-items: center; justify-content: center; height: 26px; }
+.tab .tab-ico svg { width: 24px; height: 24px; stroke: #a6abc7; transition: stroke .25s, transform .28s cubic-bezier(.34,1.56,.64,1); }
 .tab.active { color: var(--brand-ink); background: var(--brand-soft); }
-.tab.active .tab-ico { transform: translateY(-1px) scale(1.12); filter: none; }
+.tab.active .tab-ico svg { stroke: url(#tabGrad); transform: translateY(-1px) scale(1.12); }
 .tab:active { transform: scale(.92); }
+.tab:active .tab-ico svg { transform: scale(.9); }
 
 /* ===== FAB ===== */
 .fab {
