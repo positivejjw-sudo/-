@@ -43,6 +43,29 @@ const RECOMMENDED_COVERAGE = [
   { cat: 'hospital',   why: '입원 기간 소득 공백·간병비 보전' },
 ];
 
+/*
+ * 연령대별 "권장 보장 수준" 참고 가이드
+ *  - 통계적 평균이 아니라, 보험업계에서 일반적으로 권장되는 수준의 참고치입니다.
+ *  - 소득·가족구성·자산에 따라 적정 보장은 크게 달라집니다(재무 조언 아님).
+ *  - 금액형(원): death/diagnosis/disability, 보유형(있으면 OK): actualloss/hospital/surgery
+ */
+const AGE_BENCHMARKS = {
+  '20대':     { death: 50000000,  diagnosis: 30000000, disability: 100000000 },
+  '30대':     { death: 150000000, diagnosis: 50000000, disability: 100000000 },
+  '40대':     { death: 150000000, diagnosis: 70000000, disability: 100000000 },
+  '50대':     { death: 100000000, diagnosis: 70000000, disability: 100000000 },
+  '60대이상': { death: 50000000,  diagnosis: 50000000, disability: 50000000  },
+};
+const BENCHMARK_PRESENCE = ['actualloss', 'hospital', 'surgery'];
+const BENCHMARK_INFO = {
+  death:      { label: '사망보장',                 why: '가족 생활자금·부채 대비' },
+  diagnosis:  { label: '중대질병 진단비(암·뇌·심장)', why: '치료비 + 소득공백 목돈' },
+  disability: { label: '상해 후유장해',             why: '장해로 인한 소득 보전' },
+  actualloss: { label: '실손의료비',               why: '병원비 전반 — 가장 기본' },
+  hospital:   { label: '입원일당',                 why: '입원 중 소득·간병비' },
+  surgery:    { label: '수술비',                   why: '수술 비용 부담 대비' },
+};
+
 /* 보험 종류(상품군) — 폼 선택용 */
 const POLICY_TYPES = [
   '실손의료보험', '암보험', '종신보험', '정기보험', '상해보험',
