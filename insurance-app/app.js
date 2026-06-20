@@ -610,7 +610,10 @@ async function openPolicyForm(id) {
           + `<details class="ocr-text"><summary>인식된 글자 보기</summary><pre>${esc(text)}</pre></details>`;
       }
     } catch (err) {
-      status.innerHTML = '⚠️ 파일을 인식하지 못했어요(인터넷 연결이 필요하며, 암호가 걸린 PDF는 풀고 올려야 해요). 직접 추가해 주세요.';
+      const pw = err && (err.name === 'PasswordException' || /password/i.test(err.message || ''));
+      status.innerHTML = pw
+        ? '🔒 비밀번호가 필요한 PDF예요. 다시 시도하고 올바른 비밀번호(보통 생년월일 6자리)를 입력하거나, 직접 추가해 주세요.'
+        : '⚠️ 파일을 인식하지 못했어요. 인터넷 연결이 필요해요(글자 인식 엔진을 불러옴). 직접 추가도 가능합니다.';
     }
     covOcrInput.value = '';
   };
@@ -751,7 +754,19 @@ function itemsToLines(items) {
 async function extractTextFromPdf(file, onProgress) {
   const pdfjsLib = await loadPdfJs();
   const data = new Uint8Array(await file.arrayBuffer());
-  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const loadingTask = pdfjsLib.getDocument({ data });
+  // 암호가 걸린 PDF면 비밀번호를 물어봐 기기에서 바로 해제 (서버 전송 없음)
+  loadingTask.onPassword = (updatePassword, reason) => {
+    const incorrect = reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD;
+    const msg = incorrect
+      ? '비밀번호가 올바르지 않아요. 다시 입력하세요.\n(보통 생년월일 6자리, 또는 주민번호 앞 6자리 등)'
+      : '이 PDF는 비밀번호가 걸려 있어요. 비밀번호를 입력하세요.\n(보통 생년월일 6자리, 또는 주민번호 앞 6자리 등)';
+    const pw = window.prompt(msg, '');
+    if (pw === null) { try { loadingTask.destroy(); } catch (e) {} }
+    else updatePassword(pw);
+  };
+  onProgress && onProgress('PDF 여는 중…');
+  const pdf = await loadingTask.promise;
   const maxPages = Math.min(pdf.numPages, 15);
   let text = '';
   for (let i = 1; i <= maxPages; i++) {
