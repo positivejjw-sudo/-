@@ -478,7 +478,7 @@ async function openPolicyForm(id) {
       <button type="button" class="btn-primary wide" id="covOcrBtn">📋 보장내용 사진·캡처·PDF에서 자동 채우기</button>
       <input type="file" id="covOcrInput" accept="image/*,application/pdf,.pdf" hidden />
       <div id="covOcrStatus" class="hint"></div>
-      <p class="hint">보험사 앱/홈페이지의 <b>"보장내용 조회"</b> 화면을 <b>캡처(갤러리)</b> 하거나, <b>보장내용 PDF 파일</b>을 올리면 보장 항목·금액을 자동으로 읽어 채워줘요. (PDF는 글자가 있으면 더 정확하게 인식) · "🧩 템플릿"은 종류별 흔한 보장을 채웁니다.</p>
+      <p class="hint">💡 <b>가장 정확한 방법은 보험사에서 받은 "보장내용 PDF 파일"</b>을 올리는 거예요(글자가 그대로 들어있어 깨지지 않아요). 사진/캡처도 되지만, 글자가 작으면 인식이 깨질 수 있어 <b>크고 또렷하게</b> 찍어주세요. · "🧩 템플릿"은 종류별 흔한 보장을 채웁니다.</p>
       <div id="covList">${(p.coverages || []).map(covRow).join('')}</div>
 
       <label>메모 <textarea name="memo" rows="2" placeholder="기억할 점 (예: 콜센터 1588-0000)">${esc(p.memo)}</textarea></label>
@@ -587,9 +587,10 @@ async function openPolicyForm(id) {
       if (isPdf) {
         text = await extractTextFromPdf(file, msg => { status.textContent = msg; });
       } else {
-        const dataUrl = await fileToResizedDataUrl(file, 1600, 0.85);
+        status.textContent = '이미지 보정 중…';
+        const dataUrl = await preprocessForOcr(file);
         text = await runOcr(dataUrl, m => {
-          if (m && m.status === 'recognizing text') status.textContent = `인식 중… ${Math.round((m.progress || 0) * 100)}%`;
+          if (m && m.status === 'recognizing text') status.textContent = `인식 중… ${Math.round((m.progress || 0) * 100)}% (사진은 PDF보다 정확도가 낮아요)`;
         });
       }
       const rows = parseCoverageRows(text);
@@ -664,6 +665,34 @@ function fileToResizedDataUrl(file, maxDim = 1280, quality = 0.72) {
     img.onerror = rej; img.src = url;
   });
 }
+/* OCR 전처리: 고해상도 업스케일 + 흑백 + 대비 강화 (작은 한글 인식률 향상) */
+function preprocessForOcr(file, maxDim = 2200) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const longest = Math.max(img.width, img.height);
+      const scale = Math.min(2.4, Math.max(1, maxDim / longest));  // 작은 이미지는 키우고, 큰 이미지는 maxDim까지
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        const id = ctx.getImageData(0, 0, w, h), d = id.data;
+        const contrast = 1.5, k = 128 * (1 - contrast);
+        for (let i = 0; i < d.length; i += 4) {
+          const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          let v = g * contrast + k; v = v < 0 ? 0 : v > 255 ? 255 : v;
+          d[i] = d[i + 1] = d[i + 2] = v;
+        }
+        ctx.putImageData(id, 0, 0);
+      } catch (e) { /* 일부 환경에서 getImageData 실패 시 원본 사용 */ }
+      res(c.toDataURL('image/png'));
+    };
+    img.onerror = rej; img.src = url;
+  });
+}
 function loadTesseract() {
   if (window.Tesseract) return Promise.resolve(window.Tesseract);
   return new Promise((res, rej) => {
@@ -673,10 +702,19 @@ function loadTesseract() {
     document.head.appendChild(s);
   });
 }
-async function runOcr(dataUrl, onProgress) {
+async function runOcr(image, onProgress) {
   const T = await loadTesseract();
-  const { data } = await T.recognize(dataUrl, 'kor+eng', { logger: onProgress });
-  return data.text || '';
+  let worker;
+  try {
+    worker = await T.createWorker('kor+eng', 1, { logger: m => { if (onProgress) onProgress(m); } });
+    try { await worker.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' }); } catch (e) {}
+    const { data } = await worker.recognize(image);
+    return data.text || '';
+  } catch (err) {
+    // 워커 생성 실패 시 간편 API로 폴백
+    const { data } = await T.recognize(image, 'kor+eng', { logger: onProgress });
+    return data.text || '';
+  } finally { if (worker) { try { await worker.terminate(); } catch (e) {} } }
 }
 
 /* ---------- PDF에서 글자 추출 (PDF.js, 필요 시 OCR 폴백) ---------- */
