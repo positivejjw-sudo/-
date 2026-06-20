@@ -1,5 +1,5 @@
 /* 서비스워커: 앱 셸을 캐싱해 오프라인에서도 열리게 합니다. */
-const CACHE = 'my-insurance-v15';
+const CACHE = 'my-insurance-v16';
 const ASSETS = [
   './',
   './index.html',

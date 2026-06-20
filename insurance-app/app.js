@@ -843,37 +843,74 @@ function categoryFromName(n) {
   return 'etc';
 }
 /* 보장 줄이 아닌 것(보험료·계약정보·설명 조각)을 걸러내는 키워드 — 보장명에만 적용 */
-const COV_SKIP = /(보험료|적립|합계|납입|수금|환급|수익자|주민|계약자|계약번호|보험기간|주소|직업|단체|콜센터|홈페이지|대리점|지점|발행|보험증권|증권|약관|공시이율|책임준비금|상품설명서|담보명|페이지|기본사항|서열|전체피보험자|발급|제출|가입금액|보험가입|한도|공제|평균|차감|본인부담|해당액|실손보상|지급률|초과|차액|구분)/;
-/* 선두의 "보장명" 패턴 (○○보험금/진단비/담보/특약 …) */
-const COV_NAME_RE = /^[\s.\-·•|×▶▷○●■◆□☐]*([가-힣A-Za-z()%0-9]{2,30}?(?:사망보험금|진단보험금|진단비|진단금|진단담보|수술보험금|수술비|수술담보|입원보험금|입원일당|입원비|입원담보|의료비|간병자금|사망담보|후유장해담보|장해담보|배상책임|운전자|일당|치료비|치료담보|특약|담보|보험금|보장|연금))/;
+const COV_SKIP = /(보험료|적립|합계|납입|수금|환급|수익자|주민|계약자|계약번호|계약일|일자|보험기간|주소|직업|단체|콜센터|홈페이지|대리점|지점|발행|보험증권|증권|약관|공시이율|책임준비금|상품설명서|담보명|페이지|기본사항|서열|전체피보험자|발급|제출|가입금액|보험가입|한도|공제|평균|차감|본인부담|해당액|실손보상|지급률|초과|차액|구분|예금자|보호상품|1인당|별도|최고)/;
+/* 보장명 검출에서 제외할 '안내/주석' 줄 패턴 */
+const NOTE_SKIP = /(수익자|콜센터|문의|약관|납입면제|예금자|안내|확인사항|유의|참고하시|보호됩니다|상세내용)/;
+/* 이름 없는 금액줄을 이전 보장명에 이어붙일 때(이월) 제외할 줄 패턴 */
+const LINE_SKIP = /(예금자|보호됩니다|보호상품|합산|1인당|해약환급|기타지급금|콜센터|별도로|최고)/;
+/* 선두의 "보장명" 패턴 (○○보험금/진단비/담보/특약/연금 …) */
+const COV_NAME_RE = /^\s*([가-힣A-Za-z()%0-9]{2,30}?(?:사망보험금|진단보험금|진단비|진단금|진단담보|간병진단보험금|간병연금|수술보험금|수술비|수술담보|입원보험금|입원일당|입원비|입원담보|의료비|간병자금|사망담보|후유장해담보|장해담보|배상책임|운전자|일당|치료비|치료담보|특약|담보|보험금|보장|연금))/;
+function stripLead(s) {
+  return s.replace(/^\s*[０-９0-9]{1,3}\s*[.．、)]\s*/, '')
+          .replace(/^[\s※●○■◆□☐♣♠▶▷·•\-－–—|×：:]+/, '').trim();
+}
+function cleanCovName(n) {
+  n = n.replace(/^\s*[０-９0-9]{1,3}\s*[.．、)]\s*/, '')
+       .replace(/^[\s※●○■◆□☐♣♠▶▷·•\-－–—|×：:]+/, '')
+       .replace(/\s*\d+\s*(일당|일|회|년|세)\s*$/, '')
+       .replace(/[\s|]+$/, '').replace(/\s{2,}/g, ' ').trim();
+  const parts = n.split(' ');
+  if (parts.length >= 2 && parts.every(p => p.length === 1)) n = parts.join('');  // "주 보 험" → "주보험"
+  return n;
+}
+function validCovName(n) {
+  if (/[“”"']/.test(n)) return false;
+  const nk = n.replace(/\s/g, '');
+  if (nk.length < 2 || nk.length > 24 || !/[가-힣]/.test(nk)) return false;
+  if ((n.split(')').length) > (n.split('(').length)) return false;   // 괄호 짝 안 맞는 조각 제외
+  if (COV_SKIP.test(nk)) return false;
+  return true;
+}
 /*
- * 보장내용 표(사진 OCR/PDF 텍스트)에서 보장 행을 추출. 두 가지 흔한 양식을 모두 지원:
- *  (A) "보장명 + 가입금액 + 납기 + 설명" (예: 현대해상)
- *  (B) "보장명 + 긴 설명 + 보장금액(끝)" (예: 삼성생명)
- *  - 보장명 = 선두 보장명 패턴(없으면 첫 금액 앞부분)
- *  - 금액 = 줄에서 가장 큰 금액(보험료·공제 같은 작은 숫자에 속지 않게)
+ * 보장내용 표(사진 OCR/PDF 텍스트)에서 보장 행을 추출. 다양한 보험사 양식을 지원:
+ *  (A) "보장명 + 가입금액 + 납기 + 설명" (현대해상)
+ *  (B) "보장명 + 긴 설명 + 보장금액(끝)" (삼성생명)
+ *  (C) 보장명과 금액이 여러 줄에 흩어진 경우 → 직전 보장명을 이월(carry-forward)해 연결
+ *  - 금액 = 줄에서 가장 큰 금액(보험료·공제 같은 작은 숫자에 안 속게)
+ *  - "예금자보호 1억" 등 함정은 금액이 줄 끝이 아니면 제외
  */
 function parseCoverageRows(text) {
   const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
   const rows = [];
-  for (const raw of lines) {
-    const amts = allAmounts(raw);
-    if (!amts.length) continue;
-    const amt = amts.reduce((a, b) => (b.amount > a.amount ? b : a));   // 가장 큰 금액 = 보장금액
-    const mm = COV_NAME_RE.exec(raw);
-    let name = mm ? mm[1] : raw.slice(0, amts[0].index);
-    name = name.replace(/^\d+\s+/, '').replace(/^[\s.\-·•|×▶▷○●■◆]+/, '')
-               .replace(/\s*\d+\s*(일당|일|회|년|세)\s*$/, '')
-               .replace(/[\s|]+$/, '').replace(/\s{2,}/g, ' ').trim();
-    const nk = name.replace(/\s/g, '');
-    if (nk.length < 2 || nk.length > 24 || !/[가-힣]/.test(nk)) continue;
-    if ((name.split(')').length) > (name.split('(').length)) continue;   // 괄호 짝 안 맞는 조각 제외
-    if (COV_SKIP.test(nk)) continue;
-    let note = raw.replace(name, ' ');
+  let pName = null, pIdx = -1;
+  lines.forEach((raw, idx) => {
+    const line = stripLead(raw);
+    const amts = allAmounts(line);
+    const nm = COV_NAME_RE.exec(line);
+    const own = (nm && !NOTE_SKIP.test(line)) ? cleanCovName(nm[1]) : null;
+    if (own && validCovName(own)) { pName = own; pIdx = idx; }
+    if (!amts.length) return;
+
+    const beforeFirst = cleanCovName(line.slice(0, amts[0].index));
+    let name = null, amount = null, usedOwn = false, useAmt = null;
+    if (own && validCovName(own)) {
+      name = own; useAmt = amts.reduce((a, b) => (b.amount > a.amount ? b : a)); usedOwn = true;
+    } else if (validCovName(beforeFirst) && beforeFirst.replace(/\s/g, '').length <= 18 && amts[0].index <= 18) {
+      name = beforeFirst; useAmt = amts.reduce((a, b) => (b.amount > a.amount ? b : a)); usedOwn = true;
+    } else if (pName && (idx - pIdx) <= 30 && !LINE_SKIP.test(line)) {
+      const last = amts[amts.length - 1];
+      if (line.length - (last.index + last.str.length) > 6) return;   // 금액이 줄 끝이 아니면 보장값 아님
+      name = pName; useAmt = last;
+    } else { return; }
+    if (!validCovName(name)) return;
+    if (usedOwn) pName = null;   // 자기 줄에서 금액까지 잡은 보장명은 이월 금지(중복 방지)
+    amount = useAmt.amount;
+
+    let note = line.replace(name, ' ');
     amts.forEach(a => { note = note.replace(a.str, ' '); });
-    note = note.replace(/[\d,]+\s*원/g, ' ').replace(/[()|]/g, ' ').replace(/\s{2,}/g, ' ').replace(/^[\s:·-]+/, '').trim();
-    rows.push({ category: categoryFromName(nk + ' ' + note), name: name.slice(0, 40), amount: amt.amount, note: note.slice(0, 50) });
-  }
+    note = note.replace(/[\d,]+\s*원/g, ' ').replace(/[()|]/g, ' ').replace(/\s{2,}/g, ' ').replace(/^[\s:·\-]+/, '').trim();
+    rows.push({ category: categoryFromName(name.replace(/\s/g, '') + ' ' + note), name: name.slice(0, 40), amount, note: note.slice(0, 50) });
+  });
   const seen = new Set();
   return rows.filter(r => { const k = r.name.replace(/\s/g, '') + '|' + r.amount; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 60);
 }
