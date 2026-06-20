@@ -755,19 +755,21 @@ function parseOcr(text) {
 }
 
 /* 보장내용 사진(표)에서 보장 항목·금액을 자동 추출 */
-function extractAmount(line) {
+/* 줄에서 한국식 금액 토큰을 모두 추출 (억/천만/백만/만/콤마/원) */
+const AMT_RE = /\d+\s*억(?:\s*[\d,]+\s*만)?\s*원?|\d+\s*천만\s*원?|\d+\s*백만\s*원?|[\d,]+\s*만\s*원?|\d{1,3}(?:,\d{3})+\s*원?|[\d,]{4,}\s*원/g;
+function parseAmountToken(t) {
   let m;
-  m = /(\d+)\s*억(?:\s*([\d,]+)\s*만)?/.exec(line);
-  if (m) { let v = parseInt(m[1]) * 1e8; if (m[2]) v += parseInt(m[2].replace(/,/g, '')) * 1e4; return { amount: v, str: m[0], index: m.index }; }
-  m = /(\d+)\s*천만/.exec(line);
-  if (m) return { amount: parseInt(m[1]) * 1e7, str: m[0], index: m.index };
-  m = /(\d+)\s*백만/.exec(line);
-  if (m) return { amount: parseInt(m[1]) * 1e6, str: m[0], index: m.index };
-  m = /([\d,]+)\s*만/.exec(line);
-  if (m) { const n = parseInt(m[1].replace(/,/g, '')); if (n) return { amount: n * 1e4, str: m[0], index: m.index }; }
-  m = /([\d,]{4,})\s*원/.exec(line);
-  if (m) { const n = parseInt(m[1].replace(/,/g, '')); if (n >= 10000) return { amount: n, str: m[0], index: m.index }; }
-  return null;
+  if ((m = /(\d+)\s*억(?:\s*([\d,]+)\s*만)?/.exec(t))) { let v = +m[1] * 1e8; if (m[2]) v += parseInt(m[2].replace(/,/g, '')) * 1e4; return v; }
+  if ((m = /(\d+)\s*천만/.exec(t))) return +m[1] * 1e7;
+  if ((m = /(\d+)\s*백만/.exec(t))) return +m[1] * 1e6;
+  if ((m = /([\d,]+)\s*만/.exec(t))) return parseInt(m[1].replace(/,/g, '')) * 1e4;
+  if (/^[\d,]+\s*원?$/.test(t.trim())) { const n = parseInt(t.replace(/[^\d]/g, '')); return n >= 10000 ? n : 0; }
+  return 0;
+}
+function allAmounts(line) {
+  const out = []; let m; AMT_RE.lastIndex = 0;
+  while ((m = AMT_RE.exec(line))) { const v = parseAmountToken(m[0]); if (v) out.push({ amount: v, str: m[0], index: m.index }); }
+  return out;
 }
 function categoryFromName(n) {
   const map = [
@@ -788,27 +790,35 @@ function categoryFromName(n) {
   return 'etc';
 }
 /* 보장 줄이 아닌 것(보험료·계약정보·설명 조각)을 걸러내는 키워드 — 보장명에만 적용 */
-const COV_SKIP = /(보험료|적립|합계|납입|수금|환급|수익자|주민|계약자|계약번호|보험기간|주소|직업|단체|콜센터|홈페이지|대리점|지점|발행|보험증권|증권|약관|공시이율|책임준비금|상품설명서|담보명|페이지|기본사항|서열|전체피보험자|발급|제출|가입금액|한도|공제|평균|차감|본인부담|해당액|실손보상|지급률|초과|차액)/;
+const COV_SKIP = /(보험료|적립|합계|납입|수금|환급|수익자|주민|계약자|계약번호|보험기간|주소|직업|단체|콜센터|홈페이지|대리점|지점|발행|보험증권|증권|약관|공시이율|책임준비금|상품설명서|담보명|페이지|기본사항|서열|전체피보험자|발급|제출|가입금액|보험가입|한도|공제|평균|차감|본인부담|해당액|실손보상|지급률|초과|차액|구분)/;
+/* 선두의 "보장명" 패턴 (○○보험금/진단비/담보/특약 …) */
+const COV_NAME_RE = /^[\s.\-·•|×▶▷○●■◆□☐]*([가-힣A-Za-z()%0-9]{2,30}?(?:사망보험금|진단보험금|진단비|진단금|진단담보|수술보험금|수술비|수술담보|입원보험금|입원일당|입원비|입원담보|의료비|간병자금|사망담보|후유장해담보|장해담보|배상책임|운전자|일당|치료비|치료담보|특약|담보|보험금|보장|연금))/;
 /*
- * 보장내용 표(사진 OCR/PDF 텍스트)에서 보장 행을 추출.
- *  - 한 줄에 "보장명 + 가입금액 + (납기·만기) + 보장내용" 형태를 가정
- *  - 보장명 = 금액 앞부분, 분류는 보장명+설명을 함께 보고 판단
+ * 보장내용 표(사진 OCR/PDF 텍스트)에서 보장 행을 추출. 두 가지 흔한 양식을 모두 지원:
+ *  (A) "보장명 + 가입금액 + 납기 + 설명" (예: 현대해상)
+ *  (B) "보장명 + 긴 설명 + 보장금액(끝)" (예: 삼성생명)
+ *  - 보장명 = 선두 보장명 패턴(없으면 첫 금액 앞부분)
+ *  - 금액 = 줄에서 가장 큰 금액(보험료·공제 같은 작은 숫자에 속지 않게)
  */
 function parseCoverageRows(text) {
   const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
   const rows = [];
   for (const raw of lines) {
-    const amt = extractAmount(raw);
-    if (!amt) continue;                       // 가입금액 없는 줄(설명/잘린행)은 제외
-    let name = raw.slice(0, amt.index);
-    const rest = raw.slice(amt.index + amt.str.length);
-    name = name.replace(/^\d+\s+/, '').replace(/^[\s.\-·•|×]+/, '')
+    const amts = allAmounts(raw);
+    if (!amts.length) continue;
+    const amt = amts.reduce((a, b) => (b.amount > a.amount ? b : a));   // 가장 큰 금액 = 보장금액
+    const mm = COV_NAME_RE.exec(raw);
+    let name = mm ? mm[1] : raw.slice(0, amts[0].index);
+    name = name.replace(/^\d+\s+/, '').replace(/^[\s.\-·•|×▶▷○●■◆]+/, '')
                .replace(/\s*\d+\s*(일당|일|회|년|세)\s*$/, '')
                .replace(/[\s|]+$/, '').replace(/\s{2,}/g, ' ').trim();
     const nk = name.replace(/\s/g, '');
     if (nk.length < 2 || nk.length > 24 || !/[가-힣]/.test(nk)) continue;
+    if ((name.split(')').length) > (name.split('(').length)) continue;   // 괄호 짝 안 맞는 조각 제외
     if (COV_SKIP.test(nk)) continue;
-    const note = rest.replace(/^[\s원:]+/, '').replace(/\s{2,}/g, ' ').trim();
+    let note = raw.replace(name, ' ');
+    amts.forEach(a => { note = note.replace(a.str, ' '); });
+    note = note.replace(/[\d,]+\s*원/g, ' ').replace(/[()|]/g, ' ').replace(/\s{2,}/g, ' ').replace(/^[\s:·-]+/, '').trim();
     rows.push({ category: categoryFromName(nk + ' ' + note), name: name.slice(0, 40), amount: amt.amount, note: note.slice(0, 50) });
   }
   const seen = new Set();
